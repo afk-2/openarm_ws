@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<!--
+  Intel RealSense D435 from realsense2_description, plus (in simulation) a
+  Gazebo RGB-D sensor that stands in for realsense2_camera.
+
+  Frames match the real driver with camera_name:=camera
+  (camera_link, camera_color_optical_frame, camera_depth_optical_frame, ...).
+  On hardware the driver publishes the camera_link -> *_optical_frame TFs
+  itself, so the nominal extrinsics are only emitted when simulating.
+
+  The single Gazebo sensor sits at the colour imager, so its depth image is
+  already aligned to colour (like align_depth.enable:=true). Its topics are
+  bridged to the driver's names in cup_bringup/config/gz_bridge.yaml.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:include filename="$(find realsense2_description)/urdf/_d435.urdf.xacro"/>
+
+  <xacro:macro name="cup_d435" params="parent *origin simulate:=false name:=camera gz_topic:=d435">
+
+    <xacro:sensor_d435 parent="${parent}" name="${name}" use_nominal_extrinsics="${simulate}">
+      <xacro:insert_block name="origin"/>
+    </xacro:sensor_d435>
+
+    <xacro:if value="${simulate}">
+      <!-- Gazebo cameras look along +x of their link, so attach to the
+           non-optical colour frame and stamp messages with the optical one. -->
+      <gazebo reference="${name}_color_frame">
+        <sensor name="${name}_rgbd" type="rgbd_camera">
+          <topic>${gz_topic}</topic>
+          <ignition_frame_id>${name}_color_optical_frame</ignition_frame_id>
+          <always_on>true</always_on>
+          <update_rate>15</update_rate>
+          <visualize>false</visualize>
+          <camera name="${name}">
+            <!-- D435 colour: 69 x 42 deg FOV, here at 640x480. -->
+            <horizontal_fov>1.2043</horizontal_fov>
+            <image>
+              <width>640</width>
+              <height>480</height>
+              <format>R8G8B8</format>
+            </image>
+            <clip>
+              <near>0.1</near>
+              <far>10.0</far>
+            </clip>
+            <depth_camera>
+              <clip>
+                <!-- D435 depth range: ~0.28 m minimum at 640x480. -->
+                <near>0.2</near>
+                <far>6.0</far>
+              </clip>
+            </depth_camera>
+          </camera>
+        </sensor>
+      </gazebo>
+    </xacro:if>
+  </xacro:macro>
+
+</robot>

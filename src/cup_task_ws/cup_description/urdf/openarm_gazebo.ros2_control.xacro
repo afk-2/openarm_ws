@@ -1,0 +1,71 @@
+<?xml version="1.0"?>
+<!--
+  Gazebo (Fortress) replacement for openarm_description's
+  openarm.bimanual.ros2_control.xacro: same joint names and interfaces, but the
+  hardware is ign_ros2_control/IgnitionSystem instead of mock_components or
+  openarm_hardware/OpenArmHW.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="openarm_gazebo_joint" params="joint_name initial_position:=0.0">
+    <joint name="${joint_name}">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">${initial_position}</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- Gazebo has no URDF mimic support; the plugin drives the mimic finger from joint1. -->
+  <xacro:macro name="openarm_gazebo_mimic_joint" params="joint_name mimicked multiplier">
+    <joint name="${joint_name}">
+      <param name="mimic">${mimicked}</param>
+      <param name="multiplier">${multiplier}</param>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:macro name="openarm_gazebo_arm_joints" params="prefix finger_mimic_multiplier">
+    <xacro:openarm_gazebo_joint joint_name="openarm_${prefix}joint1"/>
+    <xacro:openarm_gazebo_joint joint_name="openarm_${prefix}joint2"/>
+    <xacro:openarm_gazebo_joint joint_name="openarm_${prefix}joint3"/>
+    <xacro:openarm_gazebo_joint joint_name="openarm_${prefix}joint4"/>
+    <xacro:openarm_gazebo_joint joint_name="openarm_${prefix}joint5"/>
+    <xacro:openarm_gazebo_joint joint_name="openarm_${prefix}joint6"/>
+    <xacro:openarm_gazebo_joint joint_name="openarm_${prefix}joint7"/>
+    <xacro:openarm_gazebo_joint joint_name="openarm_${prefix}finger_joint1"/>
+    <xacro:openarm_gazebo_mimic_joint joint_name="openarm_${prefix}finger_joint2"
+                                      mimicked="openarm_${prefix}finger_joint1"
+                                      multiplier="${finger_mimic_multiplier}"/>
+  </xacro:macro>
+
+  <xacro:macro name="openarm_bimanual_gazebo_ros2_control"
+               params="controllers_file
+                       left_arm_prefix:=left_
+                       right_arm_prefix:=right_
+                       left_finger_mimic_multiplier:=1.0
+                       right_finger_mimic_multiplier:=1.0">
+
+    <!-- One system for both arms: the Gazebo plugin owns a single controller manager. -->
+    <ros2_control name="openarm_gazebo_system" type="system">
+      <hardware>
+        <plugin>ign_ros2_control/IgnitionSystem</plugin>
+      </hardware>
+      <xacro:openarm_gazebo_arm_joints prefix="${left_arm_prefix}"
+                                       finger_mimic_multiplier="${left_finger_mimic_multiplier}"/>
+      <xacro:openarm_gazebo_arm_joints prefix="${right_arm_prefix}"
+                                       finger_mimic_multiplier="${right_finger_mimic_multiplier}"/>
+    </ros2_control>
+
+    <gazebo>
+      <plugin filename="libign_ros2_control-system.so" name="ign_ros2_control::IgnitionROS2ControlPlugin">
+        <parameters>${controllers_file}</parameters>
+      </plugin>
+    </gazebo>
+  </xacro:macro>
+
+</robot>

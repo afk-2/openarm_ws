@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<!--
+  SRDF for openarm_cup: OpenArm's v2.0 bimanual SRDF (groups, home/hands_up
+  states, end effectors, collision pairs) plus what our description adds.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="openarm_cup">
+
+  <xacro:include filename="$(find openarm_bimanual_moveit_config)/config/openarm_v2.0/openarm_bimanual.srdf"/>
+
+  <!-- Named poses for the cup task (they appear in RViz's Goal State list).
+       Joint angles found with an IK search and checked collision-free in the
+       cup_table planning scene. -->
+
+  <!-- Hand raised ~27 cm above the table near the body, gripper pointing down. -->
+  <group_state name="lifted" group="right_arm">
+    <joint name="openarm_right_joint1" value="-0.481"/>
+    <joint name="openarm_right_joint2" value="2.25"/>
+    <joint name="openarm_right_joint3" value="0.532"/>
+    <joint name="openarm_right_joint4" value="1.789"/>
+    <joint name="openarm_right_joint5" value="0.549"/>
+    <joint name="openarm_right_joint6" value="-0.127"/>
+    <joint name="openarm_right_joint7" value="1.399"/>
+  </group_state>
+
+  <!-- Gripper pointing down, 10 cm above the place spot (0.30, -0.32) on the
+       table (cup_task/config/pick_place.yaml: place_xy). -->
+  <group_state name="above_place" group="right_arm">
+    <joint name="openarm_right_joint1" value="1.132"/>
+    <joint name="openarm_right_joint2" value="1.121"/>
+    <joint name="openarm_right_joint3" value="-1.183"/>
+    <joint name="openarm_right_joint4" value="1.295"/>
+    <joint name="openarm_right_joint5" value="-0.126"/>
+    <joint name="openarm_right_joint6" value="0.664"/>
+    <joint name="openarm_right_joint7" value="1.491"/>
+  </group_state>
+
+  <!-- Right gripper: open = 88 mm (the real OpenArm 2.0 max jaw opening, see
+       cup_task/config/gripper_openarm_pinch.yaml), closed = fingers touching. -->
+  <group_state name="open" group="right_gripper">
+    <joint name="openarm_right_finger_joint1" value="-0.48"/>
+  </group_state>
+  <group_state name="closed" group="right_gripper">
+    <joint name="openarm_right_finger_joint1" value="0.0"/>
+  </group_state>
+
+  <!-- Missing from upstream: the arm bases are bolted to the body. -->
+  <disable_collisions link1="openarm_body_link0" link2="openarm_left_base_link" reason="Adjacent"/>
+  <disable_collisions link1="openarm_body_link0" link2="openarm_right_base_link" reason="Adjacent"/>
+  <disable_collisions link1="openarm_body_link0" link2="openarm_left_link1" reason="Never"/>
+
+  <!-- Camera mast (camera_mast.xacro): rigid chain on top of the body. -->
+  <disable_collisions link1="openarm_body_link0" link2="camera_mast_base" reason="Adjacent"/>
+  <disable_collisions link1="openarm_body_link0" link2="camera_mast" reason="Never"/>
+  <disable_collisions link1="camera_mast_base" link2="camera_mast" reason="Adjacent"/>
+  <disable_collisions link1="camera_mast" link2="camera_bracket" reason="Adjacent"/>
+  <disable_collisions link1="camera_bracket" link2="camera_tilt_plate" reason="Adjacent"/>
+  <disable_collisions link1="camera_bracket" link2="camera_link" reason="Adjacent"/>
+  <disable_collisions link1="camera_tilt_plate" link2="camera_link" reason="Adjacent"/>
+  <disable_collisions link1="camera_mast" link2="camera_link" reason="Never"/>
+
+</robot>

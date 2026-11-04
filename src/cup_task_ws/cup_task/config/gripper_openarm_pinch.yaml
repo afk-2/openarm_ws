@@ -1,0 +1,51 @@
+# Gripper description for the pick-and-place task: OpenArm v2.0 right arm
+# with the pinch gripper. The task code has no gripper-specific numbers; for
+# another gripper or custom fingers, copy this file, edit it and pass it with
+#   ros2 launch cup_task pick_place.launch.py gripper_config:=/path/to/file.yaml
+#
+# Frames: "ee_link" is the MoveIt frame the arm is planned for. Its axes, as
+# seen from the gripper:
+#   tool_axis     direction the fingers point (from the palm to the fingertips)
+#   closing_axis  direction the fingers close along
+#   (the remaining axis runs along the finger width)
+
+pick_place:
+  ros__parameters:
+    gripper:
+      arm_group: right_arm
+      ee_link: openarm_right_ee_base_link
+      tool_axis: [0.0, 0.0, -1.0]
+      closing_axis: [0.0, 1.0, 0.0]
+
+      # Robot links allowed to touch a held object (MoveIt "touch links").
+      touch_links: [openarm_right_ee_base_link, openarm_right_ee_link1, openarm_right_ee_link2]
+
+      # ros2_control controller and the joints it commands.
+      controller_action: /right_gripper_controller/follow_joint_trajectory
+      joint_names: [openarm_right_finger_joint1]
+
+      # Real OpenArm 2.0 spec: 88 mm max jaw opening. The URDF's finger joint
+      # allows more (~139 mm at -0.785 rad), so this cap keeps the sim honest.
+      max_opening: 0.088
+
+      # Jaw opening (m) -> finger joint position (rad), one row per sample,
+      # linearly interpolated. Measured on the URDF finger meshes (distance
+      # between the fingertip pads). For several joints, give one value per
+      # joint after the opening.
+      opening_table: [0.0, 0.0,
+                      0.0187, -0.10,
+                      0.0372, -0.20,
+                      0.0558, -0.30,
+                      0.0646, -0.35,
+                      0.0737, -0.40,
+                      0.0881, -0.48]
+
+      # Distance from ee_link to the finger pad centre along tool_axis, and to
+      # the very fingertip (used to keep the fingertips off the table).
+      finger_length: 0.164
+      fingertip_length: 0.170
+      # Finger size across the closing direction (used to keep clear of the
+      # handle and the table).
+      finger_width: 0.055
+
+      close_duration: 1.5   # s, time to close or open

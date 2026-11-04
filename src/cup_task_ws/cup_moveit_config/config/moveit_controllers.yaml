@@ -1,0 +1,66 @@
+# MoveIt -> ros2_control controllers started by cup_bringup/sim.launch.py
+# (cup_bringup/config/sim_controllers.yaml).
+#
+# Same as openarm_bimanual_moveit_config's openarm_v2.0/moveit_controllers.yaml
+# except for the grippers: upstream declares them as GripperCommand on
+# gripper_cmd, but every OpenArm controller config (and ours) runs them as
+# JointTrajectoryControllers, so they are FollowJointTrajectory here.
+
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  controller_names:
+    - left_joint_trajectory_controller
+    - right_joint_trajectory_controller
+    - left_gripper_controller
+    - right_gripper_controller
+
+  left_joint_trajectory_controller:
+    type: FollowJointTrajectory
+    action_ns: follow_joint_trajectory
+    default: true
+    joints:
+      - openarm_left_joint1
+      - openarm_left_joint2
+      - openarm_left_joint3
+      - openarm_left_joint4
+      - openarm_left_joint5
+      - openarm_left_joint6
+      - openarm_left_joint7
+
+  right_joint_trajectory_controller:
+    type: FollowJointTrajectory
+    action_ns: follow_joint_trajectory
+    default: true
+    joints:
+      - openarm_right_joint1
+      - openarm_right_joint2
+      - openarm_right_joint3
+      - openarm_right_joint4
+      - openarm_right_joint5
+      - openarm_right_joint6
+      - openarm_right_joint7
+
+  left_gripper_controller:
+    type: FollowJointTrajectory
+    action_ns: follow_joint_trajectory
+    default: true
+    joints:
+      - openarm_left_finger_joint1
+
+  right_gripper_controller:
+    type: FollowJointTrajectory
+    action_ns: follow_joint_trajectory
+    default: true
+    joints:
+      - openarm_right_finger_joint1
+
+trajectory_execution:
+  # MoveIt (Humble) computes the expected duration in sim time but waits for
+  # the controller in wall-clock time, so with Gazebo slower than real time
+  # (~0.3x here) the default 1.2x + 0.5 s aborts normal moves as TIMED_OUT.
+  # The controllers' own goal tolerances still catch a stuck arm.
+  allowed_execution_duration_scaling: 5.0
+  allowed_goal_duration_margin: 2.0
+  # Position control in Gazebo sags slightly under gravity at rest.
+  allowed_start_tolerance: 0.02

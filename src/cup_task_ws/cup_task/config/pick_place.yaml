@@ -1,0 +1,67 @@
+# Pick-and-place task settings. All positions are in the robot's "world"
+# frame (origin at the base of the robot body, x forward, y left, z up).
+# Gripper settings live in a separate file (gripper_openarm_pinch.yaml).
+
+pick_place:
+  ros__parameters:
+    # Where the cup's pose comes from: any node publishing a PoseStamped on
+    # this topic (base centre of the cup, x axis towards the handle).
+    # In simulation: cup_perception/gazebo_cup_pose (ground truth).
+    cup_pose_topic: /cup_pose
+    # Cup dimensions. Empty = cup_description/config/cup.yaml.
+    cup_config: ""
+
+    planning_frame: world
+    home_pose: home          # SRDF named poses used by the task
+    lifted_pose: lifted
+
+    # Place spot: cup base centre, ~17 cm to the right of where the cup starts.
+    # The cup is put down at the table height it was picked from.
+    place_xy: [0.30, -0.32]
+
+    # Grasp: the fingers close on the cup body at this fraction of its height
+    # (raised automatically if a finger corner would get closer than
+    # table_clearance to the table).
+    grasp_height_fraction: 0.5
+    table_clearance: 0.008
+    # Grasp pitch: how far the fingers point down (0 = from the side, 90 =
+    # straight down). Tried in this order; the first one whose whole
+    # pick-and-place is reachable is used. The cup stays level either way.
+    grasp_pitches_deg: [45.0, 30.0, 60.0, 15.0, 75.0, 0.0, 90.0]
+    # Pre-grasp: back off this far along the approach direction, and this far up.
+    approach_distance: 0.08
+    approach_height: 0.04
+    # After grasping, lift by this much before carrying; carry at that height.
+    lift_height: 0.10
+    # Place: release with the cup this far above the table (it drops the rest).
+    place_drop: 0.002
+    # After releasing: back away along the approach direction, then up.
+    retreat_distance: 0.08
+
+    # Speed (fraction of the joint limits) for planned and straight-line moves.
+    velocity_scaling: 0.3
+    acceleration_scaling: 0.3
+    planning_time: 10.0
+    # Reject IK solutions this close (rad) to a joint limit: a joint pressed
+    # against its end stop cannot follow the next straight-line move.
+    ik_joint_limit_margin: 0.05
+    # Straight-line moves fail if less than this fraction can be followed.
+    min_cartesian_fraction: 0.98
+    # Abort if the carried cup tilts more than this (deg).
+    max_cup_tilt_deg: 5.0
+
+    # Gripper: close until the fingers stall on the cup, then hold this much
+    # inside the measured width (a gentle, bounded squeeze). After each
+    # gripper command, wait its close_duration plus this settle time (s).
+    grasp_squeeze: 0.002
+    gripper_settle_time: 1.0
+    # After grasping, re-read the cup pose and shift the place moves by how
+    # far the cup slid while the fingers closed. Needs a cup pose source that
+    # still sees the cup in the hand (Gazebo ground truth does).
+    correct_place_with_cup_pose: true
+
+    # SIMULATION-ONLY shortcut: lock the cup to the hand with a Gazebo
+    # detachable joint while it is held (Gazebo's point contacts let a
+    # pinched cup pivot ~10 deg). Off here so the real robot never uses it;
+    # pick_place.launch.py turns it on for the simulation.
+    use_sim_attach: false

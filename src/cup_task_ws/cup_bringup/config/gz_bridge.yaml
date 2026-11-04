@@ -1,0 +1,87 @@
+# ros_gz_bridge config: Gazebo clock + D435 RGB-D sensor -> ROS topics.
+#
+# ROS names match realsense2_camera 4.5x launched with its defaults
+# (camera_namespace:=camera camera_name:=camera, align_depth.enable:=true,
+# pointcloud.enable:=true), so perception nodes run unchanged on sim and real.
+# One difference: sim depth is 32FC1 in metres, the real driver's is 16UC1 in mm.
+
+- ros_topic_name: /clock
+  gz_topic_name: /clock
+  ros_type_name: rosgraph_msgs/msg/Clock
+  gz_type_name: ignition.msgs.Clock
+  direction: GZ_TO_ROS
+
+# Colour
+- ros_topic_name: /camera/camera/color/image_raw
+  gz_topic_name: /d435/image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: ignition.msgs.Image
+  direction: GZ_TO_ROS
+  lazy: true
+
+- ros_topic_name: /camera/camera/color/camera_info
+  gz_topic_name: /d435/camera_info
+  ros_type_name: sensor_msgs/msg/CameraInfo
+  gz_type_name: ignition.msgs.CameraInfo
+  direction: GZ_TO_ROS
+
+# Depth. The sim sensor sits at the colour imager, so the same image serves as
+# both raw depth and depth aligned to colour.
+- ros_topic_name: /camera/camera/aligned_depth_to_color/image_raw
+  gz_topic_name: /d435/depth_image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: ignition.msgs.Image
+  direction: GZ_TO_ROS
+  lazy: true
+
+- ros_topic_name: /camera/camera/aligned_depth_to_color/camera_info
+  gz_topic_name: /d435/camera_info
+  ros_type_name: sensor_msgs/msg/CameraInfo
+  gz_type_name: ignition.msgs.CameraInfo
+  direction: GZ_TO_ROS
+
+- ros_topic_name: /camera/camera/depth/image_rect_raw
+  gz_topic_name: /d435/depth_image
+  ros_type_name: sensor_msgs/msg/Image
+  gz_type_name: ignition.msgs.Image
+  direction: GZ_TO_ROS
+  lazy: true
+
+- ros_topic_name: /camera/camera/depth/camera_info
+  gz_topic_name: /d435/camera_info
+  ros_type_name: sensor_msgs/msg/CameraInfo
+  gz_type_name: ignition.msgs.CameraInfo
+  direction: GZ_TO_ROS
+
+# Point cloud. Gazebo fills it in x-forward link axes; gz_cloud_to_optical
+# rotates it to optical axes and republishes /camera/camera/depth/color/points.
+- ros_topic_name: /camera/camera/depth/color/points_gz
+  gz_topic_name: /d435/points
+  ros_type_name: sensor_msgs/msg/PointCloud2
+  gz_type_name: ignition.msgs.PointCloudPacked
+  direction: GZ_TO_ROS
+  lazy: true
+
+# World poses of every moving model (Gazebo's ground truth). Used by
+# cup_perception's gazebo_cup_pose node as a stand-in for vision. Not /tf on
+# purpose: these are Gazebo-world poses, not robot frames.
+- ros_topic_name: /gazebo/dynamic_poses
+  gz_topic_name: /world/cup_table/dynamic_pose/info
+  ros_type_name: tf2_msgs/msg/TFMessage
+  gz_type_name: ignition.msgs.Pose_V
+  direction: GZ_TO_ROS
+  lazy: true
+
+# SIMULATION-ONLY: attach/detach the cup to the hand (DetachableJoint, only
+# present with sim.launch.py sim_cup_attach:=true). Sent by cup_task.
+- ros_topic_name: /cup_sim_attach/attach
+  gz_topic_name: /cup_sim_attach/attach
+  ros_type_name: std_msgs/msg/Empty
+  gz_type_name: ignition.msgs.Empty
+  direction: ROS_TO_GZ
+
+- ros_topic_name: /cup_sim_attach/detach
+  gz_topic_name: /cup_sim_attach/detach
+  ros_type_name: std_msgs/msg/Empty
+  gz_type_name: ignition.msgs.Empty
+  direction: ROS_TO_GZ

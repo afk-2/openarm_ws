@@ -1,0 +1,22 @@
+# Dimensions of the simulated cup. This is the single source of truth:
+#   - the build turns it into the Gazebo model (models/ceramic_cup, generated
+#     by scripts/generate_cup_model.py: mesh, collision shapes, inertia),
+#   - the pick-and-place task reads it to know where to grasp.
+# Change it to match your real cup, then rebuild cup_description.
+#
+# Cup frame: origin at the centre of the cup's base, z up, handle along +x.
+# All lengths in metres.
+
+cup:
+  outer_diameter: 0.065   # typical espresso cup
+  height: 0.060
+  wall_thickness: 0.0075  # espresso cups are thick-walled; gives ~90 ml
+  bottom_thickness: 0.012
+  mass: 0.15              # kg, including the handle
+
+  handle:
+    radius: 0.016         # radius of the handle's D-shaped loop (centreline)
+    thickness: 0.009      # diameter of the handle's round cross-section
+    center_height: 0.033  # height of the loop's centre above the base
+
+  friction: 0.8

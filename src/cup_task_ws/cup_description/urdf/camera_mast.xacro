@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+<!--
+  Camera mast on top of the OpenArm v2.0 body: a clamp plate on the head, a
+  vertical 20x20 mm aluminium extrusion, a horizontal bracket reaching forward
+  and a tilt plate the D435 is screwed onto (1/4" tripod screw = the D435's
+  camera_bottom_screw_frame).
+
+    mast_height     clamp plate top -> bracket underside along +z (m)
+    forward_offset  mast axis -> tilt axis along +x (m)
+    tilt            downward pitch of the camera (rad, 0 = looking forward)
+
+  Every part has collision geometry so MoveIt keeps the arms away from it.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:include filename="$(find cup_description)/urdf/d435.xacro"/>
+
+  <xacro:macro name="cup_box_link" params="name size xyz mass">
+    <link name="${name}">
+      <visual>
+        <origin xyz="${xyz}" rpy="0 0 0"/>
+        <geometry><box size="${size}"/></geometry>
+        <material name="mast_aluminium"><color rgba="0.75 0.75 0.78 1"/></material>
+      </visual>
+      <collision>
+        <origin xyz="${xyz}" rpy="0 0 0"/>
+        <geometry><box size="${size}"/></geometry>
+      </collision>
+      <inertial>
+        <origin xyz="${xyz}" rpy="0 0 0"/>
+        <mass value="${mass}"/>
+        <!-- Small but valid inertia; these links are rigidly fixed to the body. -->
+        <inertia ixx="1e-4" iyy="1e-4" izz="1e-4" ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+    </link>
+  </xacro:macro>
+
+  <xacro:macro name="cup_camera_mast"
+               params="parent mount_xyz mast_height forward_offset tilt simulate:=false">
+    <xacro:property name="plate_t" value="0.006"/>
+    <xacro:property name="bar" value="0.020"/>
+    <xacro:property name="bracket_t" value="0.010"/>
+    <xacro:property name="tilt_plate_t" value="0.004"/>
+
+    <!-- Clamp plate sitting on the head of the body. -->
+    <joint name="camera_mast_mount_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="camera_mast_base"/>
+      <origin xyz="${mount_xyz}" rpy="0 0 0"/>
+    </joint>
+    <xacro:cup_box_link name="camera_mast_base" size="0.080 0.080 ${plate_t}"
+                        xyz="0 0 ${plate_t / 2}" mass="0.08"/>
+
+    <!-- Vertical extrusion. Origin at its foot. -->
+    <joint name="camera_mast_joint" type="fixed">
+      <parent link="camera_mast_base"/>
+      <child link="camera_mast"/>
+      <origin xyz="0 0 ${plate_t}" rpy="0 0 0"/>
+    </joint>
+    <xacro:cup_box_link name="camera_mast" size="${bar} ${bar} ${mast_height}"
+                        xyz="0 0 ${mast_height / 2}" mass="${0.5 * mast_height}"/>
+
+    <!-- Horizontal bracket on top of the mast, reaching forward to the tilt axis. -->
+    <joint name="camera_bracket_joint" type="fixed">
+      <parent link="camera_mast"/>
+      <child link="camera_bracket"/>
+      <origin xyz="0 0 ${mast_height}" rpy="0 0 0"/>
+    </joint>
+    <xacro:cup_box_link name="camera_bracket"
+                        size="${forward_offset + bar} ${bar} ${bracket_t}"
+                        xyz="${forward_offset / 2} 0 ${bracket_t / 2}" mass="0.05"/>
+
+    <!-- Tilt plate hinged at the bracket tip; the D435 screws onto its top face. -->
+    <joint name="camera_tilt_joint" type="fixed">
+      <parent link="camera_bracket"/>
+      <child link="camera_tilt_plate"/>
+      <origin xyz="${forward_offset} 0 ${bracket_t}" rpy="0 ${tilt} 0"/>
+    </joint>
+    <xacro:cup_box_link name="camera_tilt_plate" size="0.030 0.040 ${tilt_plate_t}"
+                        xyz="0 0 ${tilt_plate_t / 2}" mass="0.02"/>
+
+    <xacro:cup_d435 parent="camera_tilt_plate" simulate="${simulate}">
+      <origin xyz="0 0 ${tilt_plate_t}" rpy="0 0 0"/>
+    </xacro:cup_d435>
+  </xacro:macro>
+
+</robot>

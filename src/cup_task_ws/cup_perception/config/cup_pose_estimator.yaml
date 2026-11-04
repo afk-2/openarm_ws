@@ -1,0 +1,35 @@
+# Settings for cup_perception/cup_pose_estimator (cup pose from the D435).
+# Lengths in metres, angles in degrees. Positions are in the world frame
+# (robot base on the pedestal; x forward, y left, z up; table top at z 0.35).
+
+cup_pose_estimator:
+  ros__parameters:
+    # Input: depth aligned to the colour camera, like realsense2_camera with
+    # align_depth.enable:=true. 32FC1 (metres, Gazebo) and 16UC1 (millimetres,
+    # real D435) are both accepted.
+    depth_topic: /camera/camera/aligned_depth_to_color/image_raw
+    camera_info_topic: /camera/camera/aligned_depth_to_color/camera_info
+    world_frame: world
+    max_rate: 2.0              # Hz; processing is skipped in between
+    pixel_stride: 2            # use every 2nd pixel in each direction (4x fewer points)
+    min_range: 0.2             # depth readings outside this range are ignored
+    max_range: 1.5
+
+    # Stage 1a: crop to a box above the table (world frame).
+    crop_min: [0.10, -0.60, 0.30]
+    crop_max: [0.95, 0.60, 0.60]
+
+    # Stage 1b: table plane (RANSAC).
+    plane_distance: 0.006      # points this close to the plane count as table
+    plane_max_tilt_deg: 10.0   # the table must be roughly horizontal
+    plane_iterations: 150
+    min_height_above_table: 0.008   # keep only points higher than this above the table
+
+    # Stage 1c: clustering (DBSCAN) and choosing the cup.
+    cluster_eps: 0.015         # points closer than this are neighbours
+    cluster_min_samples: 8     # neighbours needed to start a cluster
+    cup_min_points: 40
+    # Accepted cup size (espresso cup: 65 mm wide + handle, 60 mm tall; the
+    # camera sees about half of it). Adjust for a different cup.
+    cup_height_range: [0.03, 0.12]     # top of the cluster above the table
+    cup_footprint_range: [0.03, 0.12]  # largest horizontal extent of the cluster

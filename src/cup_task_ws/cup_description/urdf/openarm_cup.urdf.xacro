@@ -1,0 +1,112 @@
+<?xml version="1.0"?>
+<!--
+  OpenArm v2.0 bimanual + RealSense D435 on a mast for the cup task.
+
+  Mirrors openarm_description/.../openarm_v20.urdf.xacro, except that the
+  ros2_control hardware is selectable:
+    use_gazebo:=true   ign_ros2_control/IgnitionSystem + Gazebo control plugin
+    use_gazebo:=false  OpenArm's own macro (mock_components or OpenArmHW,
+                       via use_fake_hardware)
+
+  The D435 sits on a mast fixed to the top of the body (camera_mast.xacro);
+  mast height, forward reach and tilt are args so they can be matched to the
+  real mount. Defaults keep the reachable table area (x 0.12-0.75 m,
+  |y| < 0.4 m in front of the robot) fully in view.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="openarm_cup">
+
+  <xacro:include filename="$(find openarm_description)/assets/robot/openarm_v2.0/urdf/utils/openarm_v20_robot.xacro"/>
+  <xacro:include filename="$(find openarm_description)/assets/robot/openarm_v2.0/urdf/ros2_control/openarm.bimanual.ros2_control.xacro"/>
+  <xacro:include filename="$(find cup_description)/urdf/openarm_gazebo.ros2_control.xacro"/>
+  <xacro:include filename="$(find cup_description)/urdf/camera_mast.xacro"/>
+
+  <xacro:arg name="robot_preset" default="default_bimanual"/>
+  <xacro:arg name="collapse_internal_empty_links" default="true"/>
+  <xacro:arg name="emit_grasp_frame" default="false"/>
+
+  <xacro:arg name="use_gazebo" default="false"/>
+  <xacro:arg name="controllers_file" default=""/>
+  <xacro:arg name="use_fake_hardware" default="true"/>
+  <xacro:arg name="left_can_interface" default="can1"/>
+  <xacro:arg name="right_can_interface" default="can0"/>
+  <xacro:arg name="can_fd" default="true"/>
+
+  <!-- SIMULATION-ONLY shortcut (see the end of this file). -->
+  <xacro:arg name="sim_cup_attach" default="false"/>
+  <xacro:arg name="sim_cup_attach_link" default="openarm_right_ee_base_link"/>
+
+  <xacro:arg name="camera_mast_height" default="0.30"/>
+  <xacro:arg name="camera_forward_offset" default="0.10"/>
+  <xacro:arg name="camera_tilt" default="1.10"/>
+
+  <!-- OpenArm v2.0 kinematics, exactly as openarm_v20.urdf.xacro builds them. -->
+  <xacro:property name="robot_root" value="$(find openarm_description)/assets/robot/openarm_v2.0"/>
+  <xacro:property name="config_root" value="${robot_root + '/config'}"/>
+  <xacro:property name="robot_preset_cfg" value="${xacro.load_yaml(config_root + '/robot_presets/' + '$(arg robot_preset)' + '.yaml')}"/>
+
+  <xacro:openarm_v20_robot
+    config_root="${config_root}"
+    robot_preset="${robot_preset_cfg}"
+    collapse_internal_empty_links="$(arg collapse_internal_empty_links)"
+    emit_grasp_frame="$(arg emit_grasp_frame)"/>
+
+  <xacro:property name="pinch_mimics_file" value="$(find openarm_description)/assets/end_effector/pinch_gripper/config/joint/joint_mimics.yaml"/>
+  <xacro:property name="pinch_mimics_dict" value="${xacro.load_yaml(pinch_mimics_file)}"/>
+  <xacro:property name="pinch_finger_mimic_multiplier" value="${pinch_mimics_dict['joint2']['multiplier'] if 'joint2' in pinch_mimics_dict else 1.0}"/>
+
+  <xacro:if value="$(arg use_gazebo)">
+    <xacro:openarm_bimanual_gazebo_ros2_control
+      controllers_file="$(arg controllers_file)"
+      left_finger_mimic_multiplier="${pinch_finger_mimic_multiplier}"
+      right_finger_mimic_multiplier="${pinch_finger_mimic_multiplier}"/>
+  </xacro:if>
+
+  <xacro:unless value="$(arg use_gazebo)">
+    <xacro:property name="gains_dict" value="${xacro.load_yaml(config_root + '/arm/control/control_gains.yaml')}"/>
+    <xacro:openarm_bimanual_ros2_control
+      arm_type="v20"
+      control_gains="${gains_dict}"
+      use_fake_hardware="$(arg use_fake_hardware)"
+      left_can_interface="$(arg left_can_interface)"
+      right_can_interface="$(arg right_can_interface)"
+      can_fd="$(arg can_fd)"
+      ee_type="pinch_gripper"
+      left_arm_prefix="left_"
+      right_arm_prefix="right_"
+      left_finger_mimic_multiplier="${pinch_finger_mimic_multiplier}"
+      right_finger_mimic_multiplier="${pinch_finger_mimic_multiplier}"/>
+  </xacro:unless>
+
+  <!-- Centre of the flat top of the body's head (body_link0 collision mesh). -->
+  <xacro:cup_camera_mast
+    parent="openarm_body_link0"
+    mount_xyz="-0.010 0.0 0.773"
+    mast_height="$(arg camera_mast_height)"
+    forward_offset="$(arg camera_forward_offset)"
+    tilt="$(arg camera_tilt)"
+    simulate="$(arg use_gazebo)"/>
+
+  <!--
+    SIMULATION-ONLY SHORTCUT, NOT PHYSICS: Gazebo's DetachableJoint can rigidly
+    lock the cup to the hand while it is held. Gazebo models finger contacts
+    as single points with no grip area, so a pinched cup pivots about the line
+    between the fingertips; real finger pads resist that. The pick-and-place
+    task attaches after closing the gripper and detaches before opening it
+    (use_sim_attach). The plugin attaches as soon as it loads, so
+    sim.launch.py sends a detach right after spawning.
+  -->
+  <xacro:if value="$(arg use_gazebo)"><xacro:if value="$(arg sim_cup_attach)">
+    <gazebo>
+      <plugin filename="ignition-gazebo-detachable-joint-system"
+              name="ignition::gazebo::systems::DetachableJoint">
+        <parent_link>$(arg sim_cup_attach_link)</parent_link>
+        <child_model>ceramic_cup</child_model>
+        <child_link>cup_link</child_link>
+        <attach_topic>/cup_sim_attach/attach</attach_topic>
+        <detach_topic>/cup_sim_attach/detach</detach_topic>
+        <output_topic>/cup_sim_attach/state</output_topic>
+      </plugin>
+    </gazebo>
+  </xacro:if></xacro:if>
+
+</robot>

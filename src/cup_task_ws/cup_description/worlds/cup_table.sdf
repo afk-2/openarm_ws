@@ -1,0 +1,118 @@
+<?xml version="1.0"?>
+<!--
+  Cup task world (Gazebo Fortress).
+
+  Layout (world frame, metres):
+    - Work table: top surface at z = 0.75, spans x = [0.12, 0.92], y = [-0.6, 0.6].
+    - Robot pedestal: 0.40 m tall box behind the table. OpenArm is spawned on it
+      at (0, 0, 0.40), which puts its shoulders ~0.35 m above the table top.
+    - Espresso cup (cup_description/config/cup.yaml) on the table in front of
+      the right arm, handle turned 0.6 rad so the grasp must avoid it.
+-->
+<sdf version="1.8">
+  <world name="cup_table">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="ignition-gazebo-physics-system" name="ignition::gazebo::systems::Physics"/>
+    <plugin filename="ignition-gazebo-user-commands-system" name="ignition::gazebo::systems::UserCommands"/>
+    <plugin filename="ignition-gazebo-scene-broadcaster-system" name="ignition::gazebo::systems::SceneBroadcaster"/>
+    <!-- Render engine comes from the command line (sim.launch.py render_engine:=...). -->
+    <plugin filename="ignition-gazebo-sensors-system" name="ignition::gazebo::systems::Sensors"/>
+
+    <gravity>0 0 -9.81</gravity>
+    <scene>
+      <ambient>0.4 0.4 0.4 1</ambient>
+      <background>0.7 0.7 0.7 1</background>
+      <!-- Shadows off: they dominate sensor render time with software GL (WSL). -->
+      <shadows>false</shadows>
+    </scene>
+
+    <light type="directional" name="sun">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <!-- From behind the robot, so surfaces facing the camera are lit. -->
+      <direction>0.5 0.2 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>20 20</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>20 20</size></plane></geometry>
+          <material>
+            <ambient>0.6 0.6 0.6 1</ambient>
+            <diffuse>0.6 0.6 0.6 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="table">
+      <static>true</static>
+      <pose>0.52 0 0 0 0 0</pose>
+      <link name="link">
+        <collision name="top">
+          <pose>0 0 0.73 0 0 0</pose>
+          <geometry><box><size>0.8 1.2 0.04</size></box></geometry>
+          <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction></surface>
+        </collision>
+        <visual name="top">
+          <pose>0 0 0.73 0 0 0</pose>
+          <geometry><box><size>0.8 1.2 0.04</size></box></geometry>
+          <material>
+            <ambient>0.55 0.40 0.25 1</ambient>
+            <diffuse>0.55 0.40 0.25 1</diffuse>
+          </material>
+        </visual>
+        <visual name="leg_fl">
+          <pose>0.36 0.56 0.355 0 0 0</pose>
+          <geometry><box><size>0.04 0.04 0.71</size></box></geometry>
+        </visual>
+        <visual name="leg_fr">
+          <pose>0.36 -0.56 0.355 0 0 0</pose>
+          <geometry><box><size>0.04 0.04 0.71</size></box></geometry>
+        </visual>
+        <visual name="leg_bl">
+          <pose>-0.36 0.56 0.355 0 0 0</pose>
+          <geometry><box><size>0.04 0.04 0.71</size></box></geometry>
+        </visual>
+        <visual name="leg_br">
+          <pose>-0.36 -0.56 0.355 0 0 0</pose>
+          <geometry><box><size>0.04 0.04 0.71</size></box></geometry>
+        </visual>
+      </link>
+    </model>
+
+    <model name="robot_pedestal">
+      <static>true</static>
+      <!-- Under OpenArm's body footprint (x = [-0.155, 0.095], y = [-0.095, 0.095]). -->
+      <pose>-0.03 0 0.20 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.30 0.30 0.40</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.30 0.30 0.40</size></box></geometry>
+          <material>
+            <ambient>0.2 0.2 0.22 1</ambient>
+            <diffuse>0.2 0.2 0.22 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <include>
+      <uri>model://ceramic_cup</uri>
+      <name>ceramic_cup</name>
+      <pose>0.35 -0.15 0.75 0 0 0.6</pose>
+    </include>
+  </world>
+</sdf>
