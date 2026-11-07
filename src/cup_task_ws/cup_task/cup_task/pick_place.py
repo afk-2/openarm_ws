@@ -8,6 +8,9 @@ Sequence, logged step by step:
 Inputs (all swappable):
   /cup_pose        geometry_msgs/PoseStamped from any cup pose source
                    (base centre of the cup, x axis towards the handle)
+  handle_visible_topic (optional) std_msgs/Bool after each pose: whether the
+                   source actually saw the handle (the camera-based estimator
+                   guesses the direction of a handle it cannot see)
   cup config       cup dimensions (cup_description/config/cup.yaml by default)
   gripper config   joint names, max opening, finger size (gripper_*.yaml)
 
@@ -15,7 +18,20 @@ Before moving, every pose of the chosen grasp (approach, grasp, lift, carry,
 place, retreat) is checked with IK, so the robot does not start a motion it
 cannot finish. The hand orientation never changes while the cup is held, so
 the cup stays level.
+
+Pose source that cannot see the cup in the hand (pose_source_sees_held_cup:
+false, e.g. the camera estimator, whose self-filter removes a held cup with
+the hand): the in-hand tilt checks and the slip correction are skipped with
+a warning, the grasp is confirmed from the finger width instead, and the
+placement is checked on a fresh estimate taken after the hand has left.
+
+Hidden handle (handle_visible false): its direction is only a guess. A
+"handle could be here" zone (hidden_handle_spread_deg either side of the
+guess) goes into the planning scene, and the chosen grasp is checked with
+MoveIt's collision shapes: the closed fingers must stay at least
+hidden_handle_min_clearance from a handle anywhere in that zone.
 """
+from collections import deque
 import math
 import os
 import threading
@@ -31,14 +47,17 @@ from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.time import Time
 from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
+from std_msgs.msg import Bool
 
 from cup_task import grasps
 from cup_task.gripper import Gripper
 from cup_task.moveit_client import MoveItClient, TaskError, pose_msg, wait
 
 CUP_ID = 'ceramic_cup'  # same id as the world obstacle, so it gets replaced
+PROBE_ID = 'handle_probe'  # temporary object for the hidden-handle clearance check
 UP = grasps.UP
 
 
@@ -69,6 +88,13 @@ class PickPlace(Node):
         self.gripper_settle = p('gripper_settle_time', 1.0).value
         self.correct_place = p('correct_place_with_cup_pose', True).value
         self.limit_margin = p('ik_joint_limit_margin', 0.05).value
+        self.pose_samples = max(1, p('cup_pose_samples', 5).value)
+        self.sees_held_cup = p('pose_source_sees_held_cup', True).value
+        self.handle_visible_topic = p('handle_visible_topic', '').value
+        self.hidden_spread = p('hidden_handle_spread_deg', 45.0).value
+        self.hidden_min_clearance = p('hidden_handle_min_clearance', 0.003).value
+        self.refuse_hidden = p('refuse_hidden_handle', False).value
+        self.max_stall_over = p('max_stall_over_diameter', 0.006).value
         use_sim_attach = p('use_sim_attach', False).value
 
         with open(cup_config) as f:
@@ -82,16 +108,33 @@ class PickPlace(Node):
             from cup_task.sim_attach import SimAttach
             self.sim_attach = SimAttach(self)
 
-        self.cup_pose = None
+        self.samples = deque(maxlen=50)  # [pose message, handle visible or None]
+        self.lock = threading.Lock()
         self.joints = {}
+        self.warned = set()
         self.create_subscription(PoseStamped, self.cup_pose_topic, self._on_cup_pose, 10,
                                  callback_group=self.cb)
+        if self.handle_visible_topic:
+            self.create_subscription(Bool, self.handle_visible_topic, self._on_handle_visible,
+                                     10, callback_group=self.cb)
         self.create_subscription(JointState, '/joint_states', self._on_joints, 10,
                                  callback_group=self.cb)
 
     # ---- inputs --------------------------------------------------------------
     def _on_cup_pose(self, msg):
-        self.cup_pose = msg
+        with self.lock:
+            self.samples.append([msg, None])
+
+    def _on_handle_visible(self, msg):
+        # The estimator publishes this right after each pose.
+        with self.lock:
+            if self.samples and self.samples[-1][1] is None:
+                self.samples[-1][1] = msg.data
+
+    def warn_once(self, key, text):
+        if key not in self.warned:
+            self.warned.add(key)
+            self.get_logger().warn(text)
 
     def _on_joints(self, msg):
         self.joints.update(zip(msg.name, msg.position))
@@ -113,31 +156,74 @@ class PickPlace(Node):
                 return
         self.get_logger().warn('arm still moving; continuing anyway')
 
-    def wait_cup_pose(self, timeout=30.0):
+    def wait_cup_pose(self, samples=1, newer_than=None, timeout=30.0):
+        """
+        Cup pose from the next `samples` estimates stamped after `newer_than`.
+
+        Returns (base, yaw, tilt, handle_visible); handle_visible is None when
+        no handle_visible_topic is used. Several samples: median position,
+        average handle direction, worst tilt; if the handle was seen in some
+        estimates and not in others, the majority decides.
+        """
+        need_visible = bool(self.handle_visible_topic)
+        after = newer_than.nanoseconds if newer_than is not None else -1
         end = time.monotonic() + timeout
-        while self.cup_pose is None:
+        while True:
+            with self.lock:
+                got = [(m, v) for m, v in self.samples
+                       if Time.from_msg(m.header.stamp).nanoseconds > after
+                       and (v is not None or not need_visible)]
+            if len(got) >= samples:
+                break
             if time.monotonic() > end:
-                raise TaskError(f'no cup pose on {self.cup_pose_topic} (is a cup pose '
-                                'source running?)')
-            time.sleep(0.1)
-        msg = self.cup_pose
-        if msg.header.frame_id != self.frame:
-            raise TaskError(f'cup pose is in "{msg.header.frame_id}", expected "{self.frame}"')
-        o = msg.pose.orientation
-        q = (o.x, o.y, o.z, o.w)
-        base = np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
-        return base, grasps.yaw_of(q), grasps.tilt_deg(q)
+                raise TaskError(f'no {"new " if newer_than else ""}cup pose on '
+                                f'{self.cup_pose_topic} (is a cup pose source running, and '
+                                'can it see the cup?)')
+            time.sleep(0.05)
+        got = got[-samples:]
+        for msg, _ in got:
+            if msg.header.frame_id != self.frame:
+                raise TaskError(f'cup pose is in "{msg.header.frame_id}", expected '
+                                f'"{self.frame}"')
+        visible = None
+        if need_visible:
+            seen = sum(v for _, v in got)
+            visible = 2 * seen > len(got)
+            if 0 < seen < len(got):
+                self.get_logger().info(f'       handle seen in {seen} of {len(got)} estimates; '
+                                       f'going with "{"seen" if visible else "not seen"}"')
+            got = [(m, v) for m, v in got if v == visible]
+        quats = [(m.pose.orientation.x, m.pose.orientation.y, m.pose.orientation.z,
+                  m.pose.orientation.w) for m, _ in got]
+        base = np.median([[m.pose.position.x, m.pose.position.y, m.pose.position.z]
+                          for m, _ in got], axis=0)
+        yaws = [grasps.yaw_of(q) for q in quats]
+        yaw = math.atan2(sum(map(math.sin, yaws)), sum(map(math.cos, yaws)))
+        return base, yaw, max(grasps.tilt_deg(q) for q in quats), visible
 
     def opening(self):
         return self.gripper.opening_from([self.joints[n] for n in self.gripper.joint_names])
 
     # ---- planning scene ------------------------------------------------------
-    def cup_object(self, base, yaw):
+    def handle_box(self, base, yaw, pad=0.0):
+        """Box around the handle pointing at `yaw`, grown by `pad` on every side."""
+        c = self.cup
+        reach = c.handle_radius + c.handle_thickness / 2
+        handle_dir = np.array([math.cos(yaw), math.sin(yaw), 0.0])
+        centre = base + handle_dir * (c.radius + reach / 2) + UP * c.handle_center_height
+        box = SolidPrimitive(type=SolidPrimitive.BOX,
+                             dimensions=[reach + 2 * pad, c.handle_thickness + 2 * pad,
+                                         2 * reach + 2 * pad])
+        return box, pose_msg(centre, (0.0, 0.0, math.sin(yaw / 2), math.cos(yaw / 2)))
+
+    def cup_object(self, base, yaw, handle_spread_deg=0.0):
         """
         Planning-scene cup from the cup config: body cylinder + handle box.
 
         The body starts 4 mm above the cup base, so a cup standing on the table
-        does not count as colliding with it.
+        does not count as colliding with it. With handle_spread_deg > 0 (handle
+        not seen) there is a handle box every <= 15 deg within that angle either
+        side of `yaw`: the "handle could be here" zone.
         """
         c = self.cup
         lift = 0.004
@@ -147,13 +233,52 @@ class PickPlace(Node):
         obj.primitives.append(SolidPrimitive(type=SolidPrimitive.CYLINDER,
                                              dimensions=[body_h, c.radius]))
         obj.primitive_poses.append(pose_msg(base + UP * (lift + body_h / 2), quat))
-        reach = c.handle_radius + c.handle_thickness / 2
-        handle_dir = np.array([math.cos(yaw), math.sin(yaw), 0.0])
-        centre = base + handle_dir * (c.radius + reach / 2) + UP * c.handle_center_height
-        obj.primitives.append(SolidPrimitive(
-            type=SolidPrimitive.BOX, dimensions=[reach, c.handle_thickness, 2 * reach]))
-        obj.primitive_poses.append(pose_msg(centre, quat))
+        n = math.ceil(handle_spread_deg / 15.0)
+        for offset in np.linspace(-handle_spread_deg, handle_spread_deg, 2 * n + 1):
+            box, pose = self.handle_box(base, yaw + math.radians(offset))
+            obj.primitives.append(box)
+            obj.primitive_poses.append(pose)
         return obj
+
+    def handle_clearance(self, base, yaw, grasp_joints, offsets_deg, max_pad=0.015):
+        """
+        Gap (m) between the closed fingers at the grasp and a handle turned by
+        each offset from `yaw`, from MoveIt's collision shapes of the hand.
+
+        A handle box grown by a padding is tested for contact; the largest
+        padding without contact is the gap (0 = touching, max_pad = at least
+        that much). The cup body is taken out of the scene meanwhile (the
+        closed fingers touch it on purpose); the caller puts it back.
+        """
+        state = self.arm_seed(grasp_joints, self.cup.outer_diameter)
+
+        def hits(offset, pad):
+            probe = CollisionObject(id=PROBE_ID)
+            box, pose = self.handle_box(base, yaw + math.radians(offset), pad)
+            probe.primitives.append(box)
+            probe.primitive_poses.append(pose)
+            self.moveit.add_object(probe)
+            pairs = self.moveit.contacts(self.gripper.arm_group, state)
+            return any(PROBE_ID in pair for pair in pairs)
+
+        gaps = {}
+        self.moveit.remove_object(CUP_ID)
+        try:
+            for offset in offsets_deg:
+                if hits(offset, 0.0):
+                    gaps[offset] = 0.0
+                    continue
+                if not hits(offset, max_pad):
+                    gaps[offset] = max_pad
+                    continue
+                lo, hi = 0.0, max_pad
+                for _ in range(6):  # 0.25 mm resolution
+                    mid = (lo + hi) / 2
+                    lo, hi = (lo, mid) if hits(offset, mid) else (mid, hi)
+                gaps[offset] = lo
+        finally:
+            self.moveit.remove_object(PROBE_ID)
+        return gaps
 
     # ---- grasp selection -----------------------------------------------------
     def arm_seed(self, joints, opening):
@@ -167,8 +292,11 @@ class PickPlace(Node):
         seed.update(zip(self.gripper.joint_names, self.gripper.joints_for(opening)))
         return seed
 
-    def plan_grasp(self, base, yaw):
-        """First candidate grasp whose whole pick-and-place is reachable."""
+    def plan_grasp(self, base, yaw, handle_hidden=False):
+        """
+        First candidate grasp whose whole pick-and-place is reachable (and, for
+        a hidden handle, that keeps the fingers clear of the whole zone).
+        """
         g = self.gripper
         place_base = np.array([self.place_xy[0], self.place_xy[1], base[2]])
         current = self.arm_seed(self.joints, g.max_opening)
@@ -201,10 +329,38 @@ class PickPlace(Node):
             if failed:
                 self.get_logger().info(f'  grasp "{grasp.name}": {failed} pose unreachable')
                 continue
+            if handle_hidden and not self.hidden_handle_ok(base, yaw, solutions['grasp']):
+                continue
             self.get_logger().info(f'  grasp "{grasp.name}": all poses reachable -> using it')
             return grasp, quat, poses, solutions
         raise TaskError('no reachable grasp for this cup pose (try turning the cup or '
                         'moving it closer)')
+
+    def hidden_handle_ok(self, base, yaw, grasp_joints):
+        """Check (and log) the closed fingers' gap to a handle anywhere in the zone."""
+        spread = self.hidden_spread
+        # Checked out to 90 deg either side for the log; only the zone decides.
+        offsets = [float(a) for a in range(-90, 91, 5)]
+        t0 = time.monotonic()
+        gaps = self.handle_clearance(base, yaw, grasp_joints, offsets)
+        self.moveit.add_object(self.cup_object(base, yaw, spread))
+        zone = {a: g for a, g in gaps.items() if abs(a) <= spread + 1e-6}
+        worst = min(zone, key=zone.get)
+        first_touch = [a for a in offsets if gaps[a] == 0.0]
+        self.get_logger().info(
+            '       closed fingers vs. hidden handle, gap (mm) by handle offset (deg): '
+            + ' '.join(f'{a:+.0f}:{g * 1000:.1f}' for a, g in gaps.items() if a % 15 == 0)
+            + f' [{time.monotonic() - t0:.0f} s]')
+        self.get_logger().info(
+            f'       zone +-{spread:.0f} deg: smallest gap {zone[worst] * 1000:.1f} mm '
+            f'(handle at {worst:+.0f} deg); fingers would touch the handle at '
+            + (f'{min(abs(a) for a in first_touch):.0f} deg or more off' if first_touch
+               else 'no offset up to 90 deg'))
+        if zone[worst] < self.hidden_min_clearance:
+            self.get_logger().info(f'       less than {self.hidden_min_clearance * 1000:.0f} mm '
+                                   '-> trying the next grasp')
+            return False
+        return True
 
     # ---- the task ------------------------------------------------------------
     def run(self):
@@ -217,7 +373,22 @@ class PickPlace(Node):
             self.sim_attach.detach()  # make sure the cup starts free
         if not g.client.wait_for_server(timeout_sec=30.0):
             raise TaskError('gripper controller action not available')
-        base, yaw, tilt = self.wait_cup_pose()
+        if not self.sees_held_cup:
+            self.get_logger().warn(
+                'Cup pose source cannot see the cup while it is held: the in-hand tilt '
+                'checks and the slip correction are SKIPPED; the grasp is confirmed from '
+                'the finger width, and the placement from a new estimate after release.')
+        base, yaw, tilt, visible = self.wait_cup_pose(self.pose_samples,
+                                                      newer_than=self.get_clock().now())
+        hidden = visible is False
+        if hidden:
+            self.get_logger().warn(
+                f'Handle NOT seen: relying on the assumption that it points away from the '
+                f'camera (yaw {math.degrees(yaw):.0f} deg). Treating +-{self.hidden_spread:.0f} '
+                'deg around that as "handle could be here".')
+            if self.refuse_hidden:
+                raise TaskError('handle not seen and refuse_hidden_handle is set; turn the '
+                                'cup so the camera can see its handle')
         margin = grasps.check_fits(self.cup, g.geometry)
         log(f'Cup at ({base[0]:.3f}, {base[1]:.3f}, {base[2]:.3f}), handle yaw '
             f'{math.degrees(yaw):.0f} deg, tilt {tilt:.1f} deg. Cup '
@@ -226,7 +397,7 @@ class PickPlace(Node):
             f'{grasps.handle_clearance(self.cup) * 1000:.0f} mm from the handle.')
         if tilt > self.max_tilt:
             raise TaskError('cup is not upright; refusing to grasp')
-        self.moveit.add_object(self.cup_object(base, yaw))
+        self.moveit.add_object(self.cup_object(base, yaw, self.hidden_spread if hidden else 0.0))
         self.cup_base = base
 
         steps = [
@@ -250,7 +421,8 @@ class PickPlace(Node):
             action()
             if i == 1:
                 log('       choosing a grasp (wrist turned away from the handle):')
-                self.grasp, self.quat, self.poses, self.solutions = self.plan_grasp(base, yaw)
+                self.grasp, self.quat, self.poses, self.solutions = self.plan_grasp(base, yaw,
+                                                                                    hidden)
             log(f'[{i:2d}/{len(steps)}] {title}: done ({time.monotonic() - t0:.1f} s)')
         log('Pick-and-place finished.')
 
@@ -273,8 +445,11 @@ class PickPlace(Node):
         self.wait_settled()
         self.moveit.move_straight(self.gripper.arm_group, self.gripper.ee_link,
                                   [pose_msg(pos, self.quat)], self.min_fraction)
-        if check_level:
-            _, _, tilt = self.wait_cup_pose()
+        if check_level and not self.sees_held_cup:
+            self.warn_once('tilt', '       cup tilt NOT checked: the pose source cannot see '
+                                   'the cup in the hand')
+        elif check_level:
+            _, _, tilt, _ = self.wait_cup_pose(newer_than=self.get_clock().now())
             self.get_logger().info(f'       cup tilt {tilt:.1f} deg')
             if tilt > self.max_tilt:
                 raise TaskError(f'cup tilted {tilt:.1f} deg (limit {self.max_tilt}); stopping')
@@ -313,6 +488,9 @@ class PickPlace(Node):
                                f'(cup is {self.cup.outer_diameter * 1000:.0f} mm)')
         if stalled < 0.6 * self.cup.outer_diameter:
             raise TaskError('gripper closed on nothing: the cup was missed')
+        if stalled > self.cup.outer_diameter + self.max_stall_over:
+            raise TaskError(f'fingers stopped at {stalled * 1000:.0f} mm, wider than the cup: '
+                            'something else (the handle?) is between them')
         # (sim only) Lock the cup now: Gazebo slows to a crawl while the
         # fingers press hard into it, and the lock switches hand-cup contacts off.
         if self.sim_attach:
@@ -321,8 +499,11 @@ class PickPlace(Node):
         #    instead of driving the fingers on towards fully closed.
         self.set_gripper(stalled - self.grasp_squeeze)
         self.moveit.attach(CUP_ID, self.gripper.ee_link, self.gripper.touch_links)
-        if self.correct_place:
+        if self.correct_place and self.sees_held_cup:
             self.correct_for_cup_in_hand()
+        elif self.correct_place:
+            self.get_logger().warn('       slip correction SKIPPED: the pose source cannot see '
+                                   'the cup in the hand')
 
     def correct_for_cup_in_hand(self):
         """
@@ -330,7 +511,7 @@ class PickPlace(Node):
 
         Needs a cup pose source that still sees the cup in the hand.
         """
-        base, _, _ = self.wait_cup_pose()
+        base, _, _, _ = self.wait_cup_pose(newer_than=self.get_clock().now())
         shift = base - self.cup_base
         self.get_logger().info(
             f'       cup moved {np.linalg.norm(shift) * 1000:.0f} mm while the fingers closed '
@@ -355,7 +536,14 @@ class PickPlace(Node):
         self.moveit.move_straight(self.gripper.arm_group, self.gripper.ee_link,
                                   [pose_msg(pos, self.quat), pose_msg(up, self.quat)],
                                   self.min_fraction)
-        base, _, tilt = self.wait_cup_pose()
+        # A new estimate, taken after the hand has left (not an old message).
+        try:
+            base, _, tilt, _ = self.wait_cup_pose(min(3, self.pose_samples),
+                                                  newer_than=self.get_clock().now(),
+                                                  timeout=20.0)
+        except TaskError as e:
+            self.get_logger().warn(f'       placement not confirmed: {e}')
+            return
         err = math.hypot(base[0] - self.place_xy[0], base[1] - self.place_xy[1])
         self.get_logger().info(f'       cup placed at ({base[0]:.3f}, {base[1]:.3f}), '
                                f'{err * 1000:.0f} mm from the target, tilt {tilt:.1f} deg')

@@ -1,0 +1,58 @@
+# Test set for evaluate_perception (SIMULATION ONLY). Edit and rerun; no
+# rebuild needed when run from the workspace (the tool reads this source file).
+#
+# Positions are in the robot's "world" frame (x forward, y left, metres; the
+# table spans x 0.12..0.92, y -0.6..0.6). The camera sits at about
+# (0.11, 0.03), 0.74 m above the table.
+#
+# Handle direction of each cup, one of:
+#   yaw: <deg>       world frame (0 = +x, 90 = +y)
+#   yaw_rel: <deg>   relative to the camera: 0 = pointing straight away from it,
+#                    180 = straight at it, +90 = sideways to the left as seen
+#                    from above, -90 = to the right
+
+settings:
+  frames: 20              # estimator frames per case and noise setting
+  settle_time: 1.5        # s (sim time) to wait after moving cups, arm or noise
+  noise_modes: ['off', 'on']
+  match_distance: 0.04    # an estimate within this of a true cup counts as that cup
+  wrong_visible_deg: 30.0 # "handle seen" with a yaw error above this = wrong report
+  # Unused cups are parked here (Gazebo world, on the floor, out of view).
+  park_xy: [-1.5, 1.5]
+
+cases:
+  # Single cups across the area both arms can reach, handle every 45 deg.
+  # (mid_* use yaw_rel so their angles relative to the camera are spread out.)
+  - {name: near_right,   cups: [{xy: [0.25, -0.25], yaw: 0}]}
+  - {name: near_center,  cups: [{xy: [0.25, 0.00], yaw: 45}]}
+  - {name: near_left,    cups: [{xy: [0.25, 0.25], yaw: 90}]}
+  - {name: mid_right,    cups: [{xy: [0.40, -0.30], yaw_rel: 135}]}
+  - {name: mid_center,   cups: [{xy: [0.40, 0.00], yaw_rel: 45}]}
+  - {name: mid_left,     cups: [{xy: [0.40, 0.30], yaw_rel: -45}]}
+  - {name: far_right,    cups: [{xy: [0.55, -0.25], yaw: -90}]}
+  - {name: far_left,     cups: [{xy: [0.55, 0.25], yaw: -45}]}
+  # Beyond 1 m from the camera, where the depth noise is largest.
+  - {name: beyond_1m,    cups: [{xy: [0.85, 0.15], yaw_rel: 90}]}
+  - {name: beyond_1m_right, cups: [{xy: [0.82, -0.25], yaw_rel: -135}]}
+  # Handle straight at / straight away from the camera.
+  - {name: handle_at_camera,   cups: [{xy: [0.45, -0.12], yaw_rel: 180}]}
+  - {name: handle_away,        cups: [{xy: [0.45, -0.12], yaw_rel: 0}]}
+  # Several cups at once.
+  - name: three_cups
+    cups:
+      - {xy: [0.35, -0.15], yaw: 34}
+      - {xy: [0.55, 0.10], yaw_rel: 180}
+      - {xy: [0.30, -0.35], yaw_rel: 0}
+  # Right arm reaching over the table, above a cup (needs MoveIt running).
+  - name: arm_over_table
+    cups:
+      - {xy: [0.30, -0.35], yaw: 90}
+      - {xy: [0.45, 0.05], yaw: -30}
+    arm: {group: right_arm, poses: [lifted, above_place], back: [lifted, home]}
+
+# Which handle angles does the camera see? One cup, turned in steps all the
+# way round, at each position.
+visibility_sweep:
+  positions: [[0.35, -0.15], [0.70, 0.20]]
+  step_deg: 15
+  frames: 5

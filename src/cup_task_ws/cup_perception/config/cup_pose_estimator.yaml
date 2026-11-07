@@ -11,7 +11,8 @@ cup_pose_estimator:
     camera_info_topic: /camera/camera/aligned_depth_to_color/camera_info
     world_frame: world
     max_rate: 2.0              # Hz; processing is skipped in between
-    pixel_stride: 2            # use every 2nd pixel in each direction (4x fewer points)
+    pixel_stride: 1            # 1 = every pixel; 2 = every 2nd (4x fewer points, but
+                               # too sparse for cups ~0.7 m from the camera)
     min_range: 0.2             # depth readings outside this range are ignored
     max_range: 1.5
 
@@ -25,11 +26,53 @@ cup_pose_estimator:
     plane_iterations: 150
     min_height_above_table: 0.008   # keep only points higher than this above the table
 
-    # Stage 1c: clustering (DBSCAN) and choosing the cup.
+    # Robot self-filter: points within `margin` of the robot's own collision
+    # shapes (URDF + TF) are removed before clustering.
+    self_filter_enabled: true
+    self_filter_spacing: 0.005      # spacing of the sample points covering each link
+    self_filter_margin: 0.015       # remove camera points closer than this to the robot
+
+    # Stage 1c: clustering (DBSCAN) and choosing the cups.
     cluster_eps: 0.015         # points closer than this are neighbours
     cluster_min_samples: 8     # neighbours needed to start a cluster
     cup_min_points: 40
     # Accepted cup size (espresso cup: 65 mm wide + handle, 60 mm tall; the
     # camera sees about half of it). Adjust for a different cup.
     cup_height_range: [0.03, 0.12]     # top of the cluster above the table
-    cup_footprint_range: [0.03, 0.12]  # largest horizontal extent of the cluster
+    cup_footprint_range: [0.03, 0.12]  # largest horizontal extent of the cluster, along its
+                                       # own axes, ignoring the outermost 1% of points
+
+    # Stage 2: pose of each cup.
+    # Outer wall: points between these fractions of the cup's height (skips the
+    # inside bottom and the rim), fitted with a circle (RANSAC).
+    wall_height_band: [0.2, 0.85]
+    cup_outer_diameter: 0.065       # expected cup size (cup_description/config/cup.yaml)
+    circle_fix_radius: true         # refine the centre with the radius held at that size
+    circle_radius_range: [0.02, 0.05]
+    circle_tolerance: 0.002         # wall points within this of the circle count as inliers
+    circle_iterations: 300
+    circle_min_inliers: 30          # fewer wall points: not accepted as a cup
+    circle_min_arc_deg: 60.0        # the visible wall must span at least this much of the circle
+
+    # Handle: points between handle_gap and handle_max_reach outside the wall,
+    # within handle_height_band (fractions of the cup height). Only the biggest
+    # dense group of them counts (points closer than handle_cluster_eps are
+    # grouped), so stray edge pixels around the cup are ignored. With fewer
+    # than handle_min_points in it, the handle counts as not visible and is
+    # assumed to point away from the camera.
+    handle_gap: 0.004
+    handle_max_reach: 0.035
+    handle_height_band: [0.1, 0.95]
+    handle_min_points: 15
+    handle_cluster_eps: 0.006
+    handle_cluster_min_samples: 10  # neighbours within eps; stray edge pixels have fewer
+    # The group must stick out at least this far beyond the wall. The real handle
+    # reaches ~18 mm; depth noise ~1 m from the camera pushes blobs of the front
+    # wall up to ~7.5 mm outward, which must not count as a handle.
+    handle_min_reach: 0.010
+
+    # Target for the task (/cup_pose_estimate): the cup nearest reach_origin_xy
+    # (the right shoulder) within reach_max_distance. The task still checks
+    # real reachability with IK.
+    reach_origin_xy: [0.0, -0.1525]
+    reach_max_distance: 0.45

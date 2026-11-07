@@ -8,6 +8,29 @@ pick_place:
     # this topic (base centre of the cup, x axis towards the handle).
     # In simulation: cup_perception/gazebo_cup_pose (ground truth).
     cup_pose_topic: /cup_pose
+    # The pose used for the grasp: median of this many new estimates (smooths
+    # out camera noise; a ground-truth source just repeats the same pose).
+    cup_pose_samples: 5
+    # Can the pose source still see the cup while the hand holds it? Ground
+    # truth can; the camera estimator cannot (its self-filter removes a held
+    # cup together with the hand). false: the in-hand tilt checks and the slip
+    # correction are skipped with a warning, the grasp is confirmed from the
+    # finger width, and the placement from a new estimate after release.
+    pose_source_sees_held_cup: true
+    # Bool topic saying whether the source actually saw the handle ("" = the
+    # source always knows the handle direction, like ground truth). The camera
+    # estimator publishes /cup_pose_estimate/handle_visible.
+    handle_visible_topic: ""
+    # Handle not seen: the estimator assumes it points away from the camera.
+    # Stage 4 measured hidden handles at up to ~45 deg from that direction, so
+    # a "handle could be here" zone of this many degrees either side goes into
+    # the planning scene, and the closed fingers must stay at least
+    # hidden_handle_min_clearance (m) from a handle anywhere in it (else the
+    # next grasp candidate is tried).
+    hidden_handle_spread_deg: 45.0
+    hidden_handle_min_clearance: 0.003
+    # true: refuse to grasp a cup whose handle was not seen.
+    refuse_hidden_handle: false
     # Cup dimensions. Empty = cup_description/config/cup.yaml.
     cup_config: ""
 
@@ -54,10 +77,14 @@ pick_place:
     # inside the measured width (a gentle, bounded squeeze). After each
     # gripper command, wait its close_duration plus this settle time (s).
     grasp_squeeze: 0.002
+    # The fingers must stop on the cup: stopping wider than the cup by more
+    # than this means something else (e.g. the handle) is between them.
+    max_stall_over_diameter: 0.006
     gripper_settle_time: 1.0
     # After grasping, re-read the cup pose and shift the place moves by how
     # far the cup slid while the fingers closed. Needs a cup pose source that
-    # still sees the cup in the hand (Gazebo ground truth does).
+    # still sees the cup in the hand (Gazebo ground truth does; skipped when
+    # pose_source_sees_held_cup is false).
     correct_place_with_cup_pose: true
 
     # SIMULATION-ONLY shortcut: lock the cup to the hand with a Gazebo

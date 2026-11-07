@@ -1,0 +1,41 @@
+# SIMULATION ONLY: D435-style errors added to Gazebo's perfect depth image
+# (cup_perception/d435_depth_noise, maths in depth_noise.py). Set any
+# effect's strength to 0 to switch just that one off; switch everything off
+# with enabled: false, or while running:
+#   ros2 param set /d435_depth_noise enabled false
+# Lengths in metres.
+
+d435_depth_noise:
+  ros__parameters:
+    enabled: true
+    input_topic: /camera/camera/aligned_depth_to_color/image_raw
+    camera_info_topic: /camera/camera/aligned_depth_to_color/camera_info
+    output_topic: /camera/camera/aligned_depth_to_color/image_noisy  # 16UC1 mm, like the driver
+    seed: 0
+    max_rate: 5.0               # Hz (camera time); frames in between are dropped
+
+    # 1. Depth noise: sigma = z^2 * subpixel_rms / (depth_focal_px * baseline)
+    #    -> 0.7 mm at 0.4 m, 2.0 mm at 0.7 m, 4.2 mm at 1.0 m.
+    baseline: 0.050             # D435 IR imager spacing
+    depth_focal_px: 383.0       # D435 depth imager at 640x480
+    subpixel_rms: 0.08          # Intel's typical value; worse on dark or plain surfaces
+    correlated_fraction: 0.6    # share of the noise that comes in blobs (stereo window)
+    correlation_px: 2.0
+
+    # 2. Edges
+    shadow: true                # no depth just left of nearer objects
+    edge_jump: 0.02             # depth step between neighbours that counts as an edge
+    edge_invalid_prob: 0.3      # edge pixels with no depth
+    edge_flying_prob: 0.3       # edge pixels with a depth between front and back
+
+    # 3. Random single-pixel dropouts
+    dropout_prob: 0.005
+
+    # 4. Shiny surfaces: glossy ceramic seen at a steep angle loses blobs of depth
+    shiny_min_incidence_deg: 55.0   # only surfaces seen at more than this from head-on
+    shiny_seed_prob: 0.01           # 0 = off
+    shiny_patch_radius_px: 3
+
+    # 5. Range of the real sensor
+    min_depth: 0.28
+    max_depth: 6.0

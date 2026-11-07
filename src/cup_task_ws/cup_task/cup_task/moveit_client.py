@@ -8,6 +8,7 @@ Humble has no MoveIt Python API in its binaries, so this uses:
   /compute_cartesian_path    GetCartesianPath: straight-line hand motion
   /execute_trajectory        ExecuteTrajectory action: run a computed path
   /apply_planning_scene      ApplyPlanningScene: add/attach/detach objects
+  /check_state_validity      GetStateValidity: is a robot state in collision?
   /robot_description_semantic  SRDF, read for the named poses ("home", ...)
 """
 import time
@@ -17,7 +18,8 @@ from geometry_msgs.msg import Pose, PoseStamped
 from moveit_msgs.action import ExecuteTrajectory, MoveGroup
 from moveit_msgs.msg import (AttachedCollisionObject, CollisionObject, Constraints,
                              JointConstraint, MoveItErrorCodes, PlanningScene, RobotState)
-from moveit_msgs.srv import ApplyPlanningScene, GetCartesianPath, GetPositionIK
+from moveit_msgs.srv import (ApplyPlanningScene, GetCartesianPath, GetPositionIK,
+                             GetStateValidity)
 from rclpy.action import ActionClient
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
@@ -60,6 +62,7 @@ class MoveItClient:
         self.ik = node.create_client(GetPositionIK, '/compute_ik')
         self.cartesian = node.create_client(GetCartesianPath, '/compute_cartesian_path')
         self.scene = node.create_client(ApplyPlanningScene, '/apply_planning_scene')
+        self.validity = node.create_client(GetStateValidity, '/check_state_validity')
         self.srdf = None
         self.limits = {}
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -107,6 +110,10 @@ class MoveItClient:
                             tolerance_below=0.005, weight=1.0) for n, v in joints.items()])]
         r.start_state.is_diff = True
         goal.planning_options.plan_only = False
+        # A sampling planner's smoothed path occasionally clips an obstacle and
+        # is rejected as invalid; plan again instead of giving up.
+        goal.planning_options.replan = True
+        goal.planning_options.replan_attempts = 3
         goal.planning_options.planning_scene_diff.is_diff = True
         goal.planning_options.planning_scene_diff.robot_state.is_diff = True
         result = self.call_action(self.move_group, goal, timeout, 'planning + execution')
@@ -171,6 +178,22 @@ class MoveItClient:
         return True
 
     # ---- planning scene ----------------------------------------------------
+    def contacts(self, group, joints):
+        """Names of the bodies in collision (pairs) for a robot state given as joints."""
+        req = GetStateValidity.Request(group_name=group)
+        req.robot_state.is_diff = True
+        req.robot_state.joint_state = JointState(name=list(joints),
+                                                 position=[float(v) for v in joints.values()])
+        res = wait(self.validity.call_async(req), 10.0, 'state validity check')
+        return [(c.contact_body_1, c.contact_body_2) for c in res.contacts]
+
+    def remove_object(self, object_id):
+        scene = PlanningScene(is_diff=True)
+        obj = CollisionObject(id=object_id, operation=CollisionObject.REMOVE)
+        obj.header.frame_id = self.frame
+        scene.world.collision_objects = [obj]
+        self._apply(scene, f'remove {object_id}')
+
     def add_object(self, obj):
         scene = PlanningScene(is_diff=True)
         obj.header.frame_id = self.frame

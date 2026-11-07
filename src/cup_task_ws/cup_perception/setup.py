@@ -31,6 +31,8 @@ setup(
         'console_scripts': [
             'gazebo_cup_pose = cup_perception.gazebo_cup_pose:main',
             'cup_pose_estimator = cup_perception.cup_pose_estimator:main',
+            'd435_depth_noise = cup_perception.d435_depth_noise:main',
+            'evaluate_perception = cup_perception.evaluate_perception:main',
         ],
     },
 )
