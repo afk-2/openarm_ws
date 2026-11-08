@@ -14,9 +14,14 @@ Inputs (all swappable):
   cup config       cup dimensions (cup_description/config/cup.yaml by default)
   gripper config   joint names, max opening, finger size (gripper_*.yaml)
 
-Before moving, every pose of the chosen grasp (approach, grasp, lift, carry,
-place, retreat) is checked with IK, so the robot does not start a motion it
-cannot finish. The hand orientation never changes while the cup is held, so
+Grasp choice: the hand may approach from any direction around the cup.
+Directions that would put a finger close to the handle are dropped; the
+rest are ranked by how comfortably the arm reaches the grasp (how far its
+joints stay from their limits) and tried in that order. Before moving,
+every pose of a grasp (approach, grasp, lift, carry, place, retreat) is
+checked with IK, so the robot does not start a motion it cannot finish, and
+MoveIt checks that the closed fingers stay at least handle_min_clearance
+from the handle. The hand orientation never changes while the cup is held, so
 the cup stays level.
 
 Pose source that cannot see the cup in the hand (pose_source_sees_held_cup:
@@ -27,9 +32,8 @@ placement is checked on a fresh estimate taken after the hand has left.
 
 Hidden handle (handle_visible false): its direction is only a guess. A
 "handle could be here" zone (hidden_handle_spread_deg either side of the
-guess) goes into the planning scene, and the chosen grasp is checked with
-MoveIt's collision shapes: the closed fingers must stay at least
-hidden_handle_min_clearance from a handle anywhere in that zone.
+guess) goes into the planning scene, and the clearance check covers a
+handle anywhere in that zone.
 """
 from collections import deque
 import math
@@ -92,7 +96,11 @@ class PickPlace(Node):
         self.sees_held_cup = p('pose_source_sees_held_cup', True).value
         self.handle_visible_topic = p('handle_visible_topic', '').value
         self.hidden_spread = p('hidden_handle_spread_deg', 45.0).value
-        self.hidden_min_clearance = p('hidden_handle_min_clearance', 0.003).value
+        self.min_clearance = p('handle_min_clearance', 0.003).value
+        self.visible_margin = p('visible_handle_margin_deg', 10.0).value
+        self.heading_step = p('grasp_heading_step_deg', 30.0).value
+        self.search_group = p('grasp_search_group', '').value
+        self.finger_min_angle = p('handle_finger_min_angle_deg', 25.0).value
         self.refuse_hidden = p('refuse_hidden_handle', False).value
         self.max_stall_over = p('max_stall_over_diameter', 0.006).value
         use_sim_attach = p('use_sim_attach', False).value
@@ -292,19 +300,66 @@ class PickPlace(Node):
         seed.update(zip(self.gripper.joint_names, self.gripper.joints_for(opening)))
         return seed
 
+    def comfort(self, solution):
+        """How far the arm joints stay from their limits: 0 = at a limit, 1 = mid-range."""
+        out = 1.0
+        for name in self.arm_joints:
+            lower, upper = self.moveit.limits.get(name, (-math.pi, math.pi))
+            half = (upper - lower) / 2
+            out = min(out, min(solution[name] - lower, upper - solution[name]) / half)
+        return out
+
+    def handle_offsets(self, handle_hidden):
+        """Handle directions (deg from the estimate) the fingers must stay clear of."""
+        spread = self.hidden_spread if handle_hidden else self.visible_margin
+        n = max(1, math.ceil(spread / 5.0))
+        return [float(a) for a in np.linspace(-spread, spread, 2 * n + 1)]
+
     def plan_grasp(self, base, yaw, handle_hidden=False):
         """
-        First candidate grasp whose whole pick-and-place is reachable (and, for
-        a hidden handle, that keeps the fingers clear of the whole zone).
+        Most comfortable grasp whose whole pick-and-place is reachable and
+        whose closed fingers stay clear of the handle (or of the whole "handle
+        could be here" zone when the handle was not seen).
         """
         g = self.gripper
+        log = self.get_logger().info
         place_base = np.array([self.place_xy[0], self.place_xy[1], base[2]])
         current = self.arm_seed(self.joints, g.max_opening)
         held = self.cup.outer_diameter
-        for grasp in grasps.candidates(self.cup, yaw, g.geometry, self.height_fraction,
-                                       self.table_clearance, self.pitches):
+        offsets = self.handle_offsets(handle_hidden)
+        spread = self.hidden_spread if handle_hidden else 0.0
+
+        # 1) Every approach direction, minus those with a finger pointing
+        #    (nearly) at a possible handle direction.
+        headings = np.arange(0.0, 360.0, self.heading_step)
+        candidates = [
+            c for c in grasps.candidates(self.cup, g.geometry, self.height_fraction,
+                                         self.table_clearance, self.pitches, headings)
+            if min(grasps.angle_to_closing_line(yaw + math.radians(o), c)
+                   for o in offsets) >= self.finger_min_angle]
+
+        # 2) Rank by comfort at the grasp pose. A separate planning group with
+        #    a global IK solver (grasp_search_group) finds many more of them;
+        #    the follow-on poses below use the arm group, starting from here.
+        t0 = time.monotonic()
+        ranked = []
+        for grasp in candidates:
             quat = grasps.quat_from_matrix(grasp.rotation)
             ee = grasps.ee_position(grasp, base, g.geometry)
+            sol = self.moveit.solve_ik(self.search_group or g.arm_group, g.ee_link, ee, quat,
+                                       self.arm_seed(current, g.max_opening), attempts=2,
+                                       joints=self.arm_joints, limit_margin=self.limit_margin)
+            if sol is not None:
+                ranked.append((self.comfort(sol), grasp, quat, ee, sol))
+        ranked.sort(key=lambda r: -r[0])
+        log(f'       {len(candidates)} grasps keep the fingers away from the handle'
+            f'{" zone" if handle_hidden else ""}; {len(ranked)} reachable at the cup '
+            f'({time.monotonic() - t0:.0f} s); trying them from most to least comfortable')
+
+        # 3) The whole sequence, then the handle clearance with MoveIt.
+        for comfort, grasp, quat, ee, grasp_sol in ranked:
+            rel = math.degrees(math.remainder(yaw - math.radians(grasp.heading_deg), 2 * math.pi))
+            name = f'{grasp.name} (handle {rel:+.0f} deg from the approach)'
             back = -grasp.approach * self.approach_distance
             poses = {
                 'pre-grasp': (ee + back + UP * self.approach_height, g.max_opening),
@@ -315,52 +370,87 @@ class PickPlace(Node):
                 'retreat': (ee - base + place_base - grasp.approach * self.retreat_distance
                             + UP * self.place_drop, g.max_opening),
             }
-            solutions, seed, failed = {}, current, None
-            for name in ('grasp', 'pre-grasp', 'lift', 'above place', 'place', 'retreat'):
-                pos, opening = poses[name]
+            solutions, seed, failed = {'grasp': grasp_sol}, grasp_sol, None
+            for pose_name in ('pre-grasp', 'lift', 'above place', 'place', 'retreat'):
+                pos, opening = poses[pose_name]
                 sol = self.moveit.solve_ik(g.arm_group, g.ee_link, pos, quat,
                                            self.arm_seed(seed, opening), attempts=4,
                                            joints=self.arm_joints,
                                            limit_margin=self.limit_margin)
                 if sol is None:
-                    failed = name
+                    failed = pose_name
                     break
-                solutions[name], seed = sol, sol
+                solutions[pose_name], seed = sol, sol
             if failed:
-                self.get_logger().info(f'  grasp "{grasp.name}": {failed} pose unreachable')
+                log(f'  grasp "{name}": {failed} pose unreachable')
                 continue
-            if handle_hidden and not self.hidden_handle_ok(base, yaw, solutions['grasp']):
+            blocked = self.blocked_straight_move(poses, quat, solutions)
+            if blocked:
+                log(f'  grasp "{name}": straight-line move "{blocked}" not possible')
                 continue
-            self.get_logger().info(f'  grasp "{grasp.name}": all poses reachable -> using it')
+            gaps = self.handle_clearance(base, yaw, grasp_sol, offsets)
+            self.moveit.add_object(self.cup_object(base, yaw, spread))
+            worst = min(gaps, key=gaps.get)
+            if gaps[worst] < self.min_clearance:
+                log(f'  grasp "{name}": closed fingers {gaps[worst] * 1000:.1f} mm from a '
+                    f'handle at {worst:+.0f} deg -> too close')
+                continue
+            if handle_hidden:
+                self.log_hidden_clearance(base, yaw, grasp_sol, gaps)
+            chain = min(self.comfort(s) for s in solutions.values())
+            log(f'  grasp "{name}": all poses reachable, comfort {comfort:.2f} at the grasp '
+                f'({chain:.2f} worst along the way), fingers >= {gaps[worst] * 1000:.1f} mm '
+                'from the handle -> using it')
             return grasp, quat, poses, solutions
         raise TaskError('no reachable grasp for this cup pose (try turning the cup or '
                         'moving it closer)')
 
-    def hidden_handle_ok(self, base, yaw, grasp_joints):
-        """Check (and log) the closed fingers' gap to a handle anywhere in the zone."""
-        spread = self.hidden_spread
-        # Checked out to 90 deg either side for the log; only the zone decides.
-        offsets = [float(a) for a in range(-90, 91, 5)]
-        t0 = time.monotonic()
+    def blocked_straight_move(self, poses, quat, solutions):
+        """
+        First straight-line move of the task that cannot be followed, or None.
+
+        The IK checks only cover the end poses; the hand must also be able to
+        travel in a straight line between them (the solver may otherwise pick
+        end poses in arm configurations that no straight path connects). Each
+        move starts where the previous planned one ends, as when running.
+        Collisions are checked for the approach only: during the carry the
+        cup is not attached yet in this check, and the real moves are
+        collision-checked again when they run.
+        """
+        g = self.gripper
+        up = UP * self.lift_height
+        moves = [('descend to the grasp', ['grasp'], True, g.max_opening),
+                 ('lift', ['lift'], False, self.cup.outer_diameter),
+                 ('carry', ['above place'], False, self.cup.outer_diameter),
+                 ('lower', ['place'], False, self.cup.outer_diameter),
+                 ('retreat', ['retreat', 'retreat up'], False, g.max_opening)]
+        targets = dict(poses)
+        targets['retreat up'] = (poses['retreat'][0] + up, g.max_opening)
+        state = self.arm_seed(solutions['pre-grasp'], g.max_opening)
+        for title, names, avoid, opening in moves:
+            state = self.arm_seed(state, opening)
+            fraction, state = self.moveit.straight_path(
+                g.arm_group, g.ee_link, state,
+                [pose_msg(targets[n][0], quat) for n in names], avoid)
+            if fraction < self.min_fraction:
+                return f'{title}: {fraction * 100:.0f}%'
+        return None
+
+    def log_hidden_clearance(self, base, yaw, grasp_joints, zone_gaps):
+        """Log the finger gap to a hidden handle out to 90 deg either side."""
+        offsets = [float(a) for a in range(-90, 91, 15)]
         gaps = self.handle_clearance(base, yaw, grasp_joints, offsets)
-        self.moveit.add_object(self.cup_object(base, yaw, spread))
-        zone = {a: g for a, g in gaps.items() if abs(a) <= spread + 1e-6}
-        worst = min(zone, key=zone.get)
-        first_touch = [a for a in offsets if gaps[a] == 0.0]
+        self.moveit.add_object(self.cup_object(base, yaw, self.hidden_spread))
+        worst = min(zone_gaps, key=zone_gaps.get)
+        touch = [abs(a) for a, gap in gaps.items() if gap == 0.0]
         self.get_logger().info(
             '       closed fingers vs. hidden handle, gap (mm) by handle offset (deg): '
-            + ' '.join(f'{a:+.0f}:{g * 1000:.1f}' for a, g in gaps.items() if a % 15 == 0)
-            + f' [{time.monotonic() - t0:.0f} s]')
+            + ' '.join(f'{a:+.0f}:{gap * 1000:.1f}' for a, gap in gaps.items()))
         self.get_logger().info(
-            f'       zone +-{spread:.0f} deg: smallest gap {zone[worst] * 1000:.1f} mm '
-            f'(handle at {worst:+.0f} deg); fingers would touch the handle at '
-            + (f'{min(abs(a) for a in first_touch):.0f} deg or more off' if first_touch
-               else 'no offset up to 90 deg'))
-        if zone[worst] < self.hidden_min_clearance:
-            self.get_logger().info(f'       less than {self.hidden_min_clearance * 1000:.0f} mm '
-                                   '-> trying the next grasp')
-            return False
-        return True
+            f'       zone +-{self.hidden_spread:.0f} deg: smallest gap '
+            f'{zone_gaps[worst] * 1000:.1f} mm (handle at {worst:+.0f} deg); fingers would '
+            'touch the handle at ' + (f'{min(touch):.0f} deg or more off' if touch
+                                      else 'no offset up to 90 deg'))
 
     # ---- the task ------------------------------------------------------------
     def run(self):
@@ -393,8 +483,7 @@ class PickPlace(Node):
         log(f'Cup at ({base[0]:.3f}, {base[1]:.3f}, {base[2]:.3f}), handle yaw '
             f'{math.degrees(yaw):.0f} deg, tilt {tilt:.1f} deg. Cup '
             f'{self.cup.outer_diameter * 1000:.0f} mm, gripper opens {g.max_opening * 1000:.0f} '
-            f'mm -> {margin * 1000:.1f} mm clearance per side; fingers stay '
-            f'{grasps.handle_clearance(self.cup) * 1000:.0f} mm from the handle.')
+            f'mm -> {margin * 1000:.1f} mm clearance per side.')
         if tilt > self.max_tilt:
             raise TaskError('cup is not upright; refusing to grasp')
         self.moveit.add_object(self.cup_object(base, yaw, self.hidden_spread if hidden else 0.0))
@@ -420,7 +509,7 @@ class PickPlace(Node):
             t0 = time.monotonic()
             action()
             if i == 1:
-                log('       choosing a grasp (wrist turned away from the handle):')
+                log('       choosing a grasp (all directions, most comfortable first):')
                 self.grasp, self.quat, self.poses, self.solutions = self.plan_grasp(base, yaw,
                                                                                     hidden)
             log(f'[{i:2d}/{len(steps)}] {title}: done ({time.monotonic() - t0:.1f} s)')

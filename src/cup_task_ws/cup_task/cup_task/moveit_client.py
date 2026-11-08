@@ -140,6 +140,30 @@ class MoveItClient:
         self._check(self.call_action(self.execute, goal, timeout, 'execution').error_code,
                     'execute')
 
+    def straight_path(self, group, link, start_joints, waypoints, avoid_collisions=True):
+        """
+        Plan (without moving) a straight-line hand move from a given joint state.
+
+        Returns (fraction possible, joint state at the end of the computed path).
+        """
+        req = GetCartesianPath.Request()
+        req.header.frame_id = self.frame
+        req.start_state.is_diff = True
+        req.start_state.joint_state = JointState(
+            name=list(start_joints), position=[float(v) for v in start_joints.values()])
+        req.group_name = group
+        req.link_name = link
+        req.waypoints = waypoints
+        req.max_step = 0.005
+        req.jump_threshold = 5.0
+        req.avoid_collisions = avoid_collisions
+        res = wait(self.cartesian.call_async(req), 60.0, 'Cartesian path')
+        end = dict(start_joints)
+        points = res.solution.joint_trajectory.points
+        if points:
+            end.update(zip(res.solution.joint_trajectory.joint_names, points[-1].positions))
+        return res.fraction, end
+
     def solve_ik(self, group, link, position, quat_xyzw, seed_joints=None, attempts=5,
                  joints=(), limit_margin=0.0):
         """

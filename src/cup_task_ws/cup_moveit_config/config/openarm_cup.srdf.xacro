@@ -7,6 +7,20 @@
 
   <xacro:include filename="$(find openarm_bimanual_moveit_config)/config/openarm_v2.0/openarm_bimanual.srdf"/>
 
+  <!-- Same joints as right_arm, with a different IK solver (pick_ik, see
+       config/kinematics.yaml). cup_task uses it only to find and rank grasps
+       at the cup; everything else (follow-on poses, straight-line moves,
+       planning) uses right_arm with KDL. -->
+  <group name="right_arm_ik">
+    <joint name="openarm_right_joint1"/>
+    <joint name="openarm_right_joint2"/>
+    <joint name="openarm_right_joint3"/>
+    <joint name="openarm_right_joint4"/>
+    <joint name="openarm_right_joint5"/>
+    <joint name="openarm_right_joint6"/>
+    <joint name="openarm_right_joint7"/>
+  </group>
+
   <!-- Named poses for the cup task (they appear in RViz's Goal State list).
        Joint angles found with an IK search and checked collision-free in the
        cup_table planning scene. -->

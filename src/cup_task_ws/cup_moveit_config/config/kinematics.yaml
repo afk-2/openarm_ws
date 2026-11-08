@@ -1,0 +1,50 @@
+# IK solvers for the cup task (replaces openarm_bimanual_moveit_config's
+# kinematics.yaml, which is left untouched).
+#
+# left_arm, right_arm: upstream's KDL solver. KDL searches outward from the
+# joint angles it is given, so consecutive poses of a task (and the steps
+# of a straight-line move) stay in one arm configuration.
+#
+# right_arm_ik (same joints, defined in openarm_cup.srdf.xacro): pick_ik
+# (ros-humble-pick-ik), a global search that finds many more grasp poses at
+# the cup than KDL and prefers joint angles away from the limits. cup_task
+# uses it only to find and rank grasps; the follow-on poses are then solved
+# with right_arm (KDL), starting from that grasp solution. (pick_ik for
+# right_arm itself failed: its global search jumps between arm
+# configurations from one pose to the next, so 0/10 runs found a usable
+# sequence.)
+
+left_arm:
+  kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin
+  kinematics_solver_search_resolution: 0.005
+  kinematics_solver_timeout: 0.005
+
+right_arm:
+  kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin
+  kinematics_solver_search_resolution: 0.005
+  kinematics_solver_timeout: 0.005
+
+right_arm_ik:
+  kinematics_solver: pick_ik/PickIkPlugin
+  kinematics_solver_timeout: 0.2       # s (the task's IK requests set their own)
+  mode: global                         # global search (memetic algorithm), not just local descent
+  memetic_population_size: 32          # wider global search (defaults 16 / 100 / 1):
+  memetic_max_generations: 300         #   same success rate, but finds solutions further
+  memetic_num_threads: 4               #   from the joint limits
+  position_threshold: 0.001            # m, how exactly the hand must reach the pose
+  orientation_threshold: 0.01          # rad (~0.6 deg); keeps the cup level
+  position_scale: 1.0
+  rotation_scale: 1.0                  # orientation matters as much as position
+  # Prefer solutions away from the joint limits. Tested at position A
+  # (48 grasp poses): weight 0 -> median "comfort" 0.08 (joints close to a
+  # limit); 0.1 -> 0.33 at the same success rate; 1.0 -> almost no solutions
+  # (the pull away from the limits stops it reaching the exact hand pose).
+  avoid_joint_limits_weight: 0.1
+  center_joints_weight: 0.0
+  minimal_displacement_weight: 0.0
+  # pick_ik only accepts a solution when every cost term (including the
+  # joint-limit one above) is below cost_threshold; the default 0.001 rejects
+  # almost everything once that weight is on. Hand position/orientation
+  # accuracy is checked separately by the two thresholds above.
+  cost_threshold: 100.0
+  stop_optimization_on_valid_solution: true

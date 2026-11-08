@@ -7,7 +7,8 @@ Gazebo controllers are up. Standalone (sim already running):
     ros2 launch cup_moveit_config move_group.launch.py
 
 Reused from openarm_bimanual_moveit_config (openarm_v2.0): SRDF (wrapped in
-config/openarm_cup.srdf.xacro), kinematics.yaml, joint_limits.yaml.
+config/openarm_cup.srdf.xacro), joint_limits.yaml; kinematics.yaml is cup_moveit_config's own
+(KDL for the arms, pick_ik for the right_arm_ik grasp-search group).
 Our own: robot description (cup_description), controllers, planning scene
 obstacles taken from the Gazebo world, RViz config.
 """
@@ -45,7 +46,8 @@ def launch_setup(context):
                                    'urdf', 'openarm_cup.urdf.xacro'),
             mappings=description_mappings)
         .robot_description_semantic(file_path='config/openarm_cup.srdf.xacro')
-        .robot_description_kinematics(file_path=os.path.join(upstream_config, 'kinematics.yaml'))
+        # Own kinematics.yaml: KDL for the arms, pick_ik for the right_arm_ik group.
+        .robot_description_kinematics(file_path='config/kinematics.yaml')
         .joint_limits(file_path=os.path.join(upstream_config, 'joint_limits.yaml'))
         .trajectory_execution(file_path='config/moveit_controllers.yaml')
         .planning_pipelines(pipelines=['ompl'], default_planning_pipeline='ompl')

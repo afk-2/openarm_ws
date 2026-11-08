@@ -5,14 +5,16 @@ A grasp is described by where the gripper's axes point in the world:
   tool     direction the fingers point (palm -> fingertips)
   closing  direction the fingers close along
   width    the remaining axis, along the finger width
-All candidates belong to one family:
-  - the tool points along the handle's axis (handle away from the gripper,
-    or towards the palm), pitched down by an angle: 0 deg = from the side,
-    90 deg = straight down from above
-  - the closing axis is level and at right angles to the handle, so the
-    fingers squeeze the cup body symmetrically and never touch the handle
+Candidates come from every direction around the cup:
+  - the hand approaches from a heading (any direction around the cup),
+    pitched down by an angle: 0 deg = from the side, 90 deg = straight
+    down from above
+  - the closing axis is level and at right angles to the approach, so the
+    fingers squeeze the cup body symmetrically through its centre
   - the fingers close at the requested height on the body, raised if needed
     to keep the finger corners off the table
+Whether the fingers stay clear of the handle depends on the heading; the
+task checks that with MoveIt (pick_place.handle_clearance).
 The cup stays level because the hand orientation does not change while the
 cup is held, whatever the pitch.
 """
@@ -59,6 +61,7 @@ class Grasp:
     rotation: np.ndarray       # ee_link orientation in the world (3x3)
     approach: np.ndarray       # unit vector the gripper moves along to reach the cup
     contact_height: float      # above the cup base
+    heading_deg: float = 0.0   # horizontal approach direction in the world
 
 
 def yaw_of(quat_xyzw):
@@ -88,12 +91,16 @@ def _rotation(gripper, tool, closing):
     return world_axes @ ee_axes.T
 
 
-def candidates(cup, cup_yaw, gripper, height_fraction, table_clearance, pitches_deg):
-    """Grasp candidates, in order of preference (handle away first, then pitches as given)."""
-    handle = np.array([math.cos(cup_yaw), math.sin(cup_yaw), 0.0])
+def candidates(cup, gripper, height_fraction, table_clearance, pitches_deg, headings_deg):
+    """
+    Grasp candidates for every approach heading (world deg, the horizontal
+    direction the hand moves in to reach the cup) and pitch.
+    """
     tip_extra = gripper.fingertip_length - gripper.finger_length
     out = []
-    for label, along in (('handle away', handle), ('handle towards palm', -handle)):
+    for heading in headings_deg:
+        along = np.array([math.cos(math.radians(heading)), math.sin(math.radians(heading)), 0.0])
+        label = f'heading {heading:.0f} deg'
         for pitch_deg in pitches_deg:
             pitch = math.radians(pitch_deg)
             tool = math.cos(pitch) * along - math.sin(pitch) * UP
@@ -107,7 +114,7 @@ def candidates(cup, cup_yaw, gripper, height_fraction, table_clearance, pitches_
                 if height > 0.85 * cup.height:
                     continue  # fingers would only catch the rim
                 out.append(Grasp(f'{label}, pitch {pitch_deg:.0f} deg{wrist}',
-                                 _rotation(gripper, tool, closing), tool, height))
+                                 _rotation(gripper, tool, closing), tool, height, heading))
     return out
 
 
@@ -126,6 +133,11 @@ def check_fits(cup, gripper):
     return (gripper.max_opening - cup.outer_diameter) / 2
 
 
-def handle_clearance(cup):
-    """Gap between the handle and the fingers, measured along the closing axis."""
-    return cup.radius - cup.handle_thickness / 2
+def angle_to_closing_line(direction_yaw, grasp):
+    """
+    Angle (deg, 0..90) between a horizontal direction and the line the
+    fingers close along: 0 = pointing straight at a finger.
+    """
+    c = math.radians(grasp.heading_deg + 90.0)
+    d = abs(math.cos(direction_yaw - c))
+    return math.degrees(math.acos(min(1.0, d)))

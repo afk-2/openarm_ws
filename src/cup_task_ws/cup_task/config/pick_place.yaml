@@ -24,11 +24,8 @@ pick_place:
     # Handle not seen: the estimator assumes it points away from the camera.
     # Stage 4 measured hidden handles at up to ~45 deg from that direction, so
     # a "handle could be here" zone of this many degrees either side goes into
-    # the planning scene, and the closed fingers must stay at least
-    # hidden_handle_min_clearance (m) from a handle anywhere in it (else the
-    # next grasp candidate is tried).
+    # the planning scene, and the finger clearance check covers all of it.
     hidden_handle_spread_deg: 45.0
-    hidden_handle_min_clearance: 0.003
     # true: refuse to grasp a cup whose handle was not seen.
     refuse_hidden_handle: false
     # Cup dimensions. Empty = cup_description/config/cup.yaml.
@@ -48,9 +45,30 @@ pick_place:
     grasp_height_fraction: 0.5
     table_clearance: 0.008
     # Grasp pitch: how far the fingers point down (0 = from the side, 90 =
-    # straight down). Tried in this order; the first one whose whole
-    # pick-and-place is reachable is used. The cup stays level either way.
+    # straight down). The cup stays level either way.
     grasp_pitches_deg: [45.0, 30.0, 60.0, 15.0, 75.0, 0.0, 90.0]
+    # The hand may approach from any direction around the cup, in steps of
+    # this many degrees. Every heading x pitch combination is tried at the
+    # grasp pose and ranked by how far the arm's joints stay from their
+    # limits; the most comfortable one whose whole sequence is reachable wins.
+    grasp_heading_step_deg: 30.0
+    # Planning group used only to find and rank grasps at the cup (same
+    # joints as the arm group, different IK solver: cup_moveit_config's
+    # right_arm_ik uses pick_ik, a global search). The follow-on poses and
+    # straight-line moves use the arm group, starting from the grasp found.
+    # "" = use the arm group (KDL) for everything. In testing (5 runs each,
+    # noise on) both settings completed 1/5; the cup was grasped and put down
+    # in 3/5 with right_arm_ik vs 2/5 with "" (results/pick_place_runs_*.csv).
+    grasp_search_group: right_arm_ik
+    # Skip directions where a finger would point within this angle of the
+    # handle (or of the "handle could be here" zone): cheap first filter.
+    handle_finger_min_angle_deg: 25.0
+    # Then MoveIt checks the closed fingers against the handle's collision
+    # box: they must stay at least this far (m) from it, for the handle
+    # anywhere within visible_handle_margin_deg of the estimate (seen
+    # handles: covers the estimate's yaw error) or the whole hidden zone.
+    handle_min_clearance: 0.003
+    visible_handle_margin_deg: 10.0
     # Pre-grasp: back off this far along the approach direction, and this far up.
     approach_distance: 0.08
     approach_height: 0.04
