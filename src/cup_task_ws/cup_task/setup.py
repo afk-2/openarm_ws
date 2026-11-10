@@ -29,6 +29,7 @@ setup(
     entry_points={
         'console_scripts': [
             'pick_place = cup_task.pick_place:main',
+            'reachability_map = cup_task.reachability_map:main',
         ],
     },
 )

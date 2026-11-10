@@ -1,6 +1,7 @@
 # Settings for cup_perception/cup_pose_estimator (cup pose from the D435).
 # Lengths in metres, angles in degrees. Positions are in the world frame
-# (robot base on the pedestal; x forward, y left, z up; table top at z 0.35).
+# (robot base on the pedestal; x forward, y left, z up). With the default
+# mounting height (0.40 m) the table top is at z 0.35.
 
 cup_pose_estimator:
   ros__parameters:
@@ -16,9 +17,14 @@ cup_pose_estimator:
     min_range: 0.2             # depth readings outside this range are ignored
     max_range: 1.5
 
-    # Stage 1a: crop to a box above the table (world frame).
-    crop_min: [0.10, -0.60, 0.30]
-    crop_max: [0.95, 0.60, 0.60]
+    # Stage 1a: crop to a box above the table: x, y in the world frame, z as
+    # height above the FLOOR (table top at 0.75), so the box stays on the table
+    # whatever the robot's mounting height.
+    crop_min: [0.10, -0.60, 0.70]
+    crop_max: [0.95, 0.60, 1.00]
+    # Robot base height above the floor (sim.launch.py spawn_z; the estimator
+    # launch file passes it). Converts the crop heights to the world frame.
+    mount_height: 0.40
 
     # Stage 1b: table plane (RANSAC).
     plane_distance: 0.006      # points this close to the plane count as table

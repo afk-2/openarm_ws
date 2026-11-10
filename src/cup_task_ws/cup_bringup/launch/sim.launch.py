@@ -13,6 +13,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from cup_description.robot_description import openarm_cup_urdf
+from cup_description.world import world_for_mount
 from launch import LaunchDescription
 from launch.actions import (AppendEnvironmentVariable, DeclareLaunchArgument,
                             EmitEvent, ExecuteProcess, IncludeLaunchDescription,
@@ -66,7 +67,10 @@ def generate_launch_description():
                         'while held (Gazebo point contacts let a pinched cup pivot).'),
         DeclareLaunchArgument(
             'spawn_z', default_value='0.40',
-            description='Height of the robot base (top of the pedestal in the world).'),
+            description='Robot mounting height: its base (top of the pedestal) above the '
+                        'floor (m). The pedestal is resized to match; the table top stays '
+                        'at 0.75 m. Pass the same value to the estimator and pick_place '
+                        'launch files.'),
         # Defaults must match openarm_cup.urdf.xacro.
         DeclareLaunchArgument('camera_mast_height', default_value='0.30',
                               description='Mast height above the body top (m).'),
@@ -102,9 +106,12 @@ def generate_launch_description():
         )]
 
     def gazebo(context):
+        # The pedestal is resized to the spawn height (the table stays put).
+        world_file = world_for_mount(world.perform(context),
+                                     LaunchConfiguration('spawn_z').perform(context))
         cmd = ['ign', 'gazebo', '-r', '-v', '3',
                '--render-engine', LaunchConfiguration('render_engine').perform(context),
-               world.perform(context)]
+               world_file]
         if LaunchConfiguration('gui').perform(context) != 'true':
             cmd.insert(2, '-s')
         # Same plugin lookup ros_gz_sim's gz_sim.launch.py sets up (finds ign_ros2_control).

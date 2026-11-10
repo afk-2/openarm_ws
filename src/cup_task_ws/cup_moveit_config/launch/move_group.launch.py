@@ -16,6 +16,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from cup_description.robot_description import openarm_cup_urdf
+from cup_description.world import world_for_mount
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
@@ -74,7 +75,8 @@ def launch_setup(context):
         executable='add_world_obstacles.py',
         output='screen',
         parameters=[{
-            'world_file': arg('world'),
+            # Pedestal resized to the spawn height, as in Gazebo.
+            'world_file': world_for_mount(arg('world'), arg('spawn_z')),
             'models': models,
             'spawn_xyz': [0.0, 0.0, float(arg('spawn_z'))],
         }, sim_time],
@@ -110,7 +112,8 @@ def generate_launch_description():
             'world', default_value=os.path.join(description_share, 'worlds', 'cup_table.sdf'),
             description='Gazebo world to take the planning scene obstacles from.'),
         DeclareLaunchArgument('spawn_z', default_value='0.40',
-                              description='Robot spawn height in the Gazebo world (m).'),
+                              description='Robot mounting height above the floor (m); '
+                                          'the pedestal obstacle is resized to match.'),
         DeclareLaunchArgument(
             'add_cup', default_value='true',
             description='Also add the cup from the world file (ground truth, a stand-in '

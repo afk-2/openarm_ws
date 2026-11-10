@@ -23,11 +23,24 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.conditions import IfCondition, LaunchConfigurationEquals, UnlessCondition
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+
+def gazebo_pose_source(context):
+    """Gazebo ground-truth cup pose, shifted by the robot's mounting height."""
+    if LaunchConfiguration('cup_pose_source').perform(context) != 'gazebo':
+        return []
+    spawn_z = float(LaunchConfiguration('spawn_z').perform(context))
+    return [Node(
+        package='cup_perception',
+        executable='gazebo_cup_pose',
+        output='screen',
+        parameters=[{'use_sim_time': True, 'spawn_xyz': [0.0, 0.0, spawn_z]}],
+    )]
 
 
 def generate_launch_description():
@@ -42,6 +55,9 @@ def generate_launch_description():
         DeclareLaunchArgument('task_config',
                               default_value=os.path.join(config, 'pick_place.yaml'),
                               description='Task settings (place spot, distances, speeds).'),
+        DeclareLaunchArgument('spawn_z', default_value='0.40',
+                              description='Robot mounting height (as sim.launch.py); used '
+                                          'by the Gazebo ground-truth pose source.'),
         DeclareLaunchArgument('pose_from_perception', default_value='false',
                               description='/cup_pose comes from cup_pose_estimator: skip '
                                           'in-hand checks, use its handle_visible flag.'),
@@ -50,14 +66,7 @@ def generate_launch_description():
                                           'Gazebo while held (needs sim.launch.py '
                                           'sim_cup_attach:=true).'),
 
-        Node(
-            package='cup_perception',
-            executable='gazebo_cup_pose',
-            output='screen',
-            # spawn_xyz defaults to sim.launch.py's robot spawn position.
-            parameters=[{'use_sim_time': True}],
-            condition=LaunchConfigurationEquals('cup_pose_source', 'gazebo'),
-        ),
+        OpaqueFunction(function=gazebo_pose_source),
         Node(
             package='cup_task',
             executable='pick_place',

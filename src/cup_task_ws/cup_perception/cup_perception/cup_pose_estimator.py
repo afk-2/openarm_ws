@@ -87,7 +87,11 @@ class CupPoseEstimator(Node):
         self.period = 1.0 / p('max_rate', 2.0)
         self.stride = p('pixel_stride', 2)
         self.range = (p('min_range', 0.2), p('max_range', 1.5))
-        self.crop = (p('crop_min', [0.10, -0.60, 0.30]), p('crop_max', [0.95, 0.60, 0.60]))
+        # Crop heights are given above the floor; the world frame is the robot
+        # base, mount_height above it.
+        mount = p('mount_height', 0.40)
+        lo, hi = p('crop_min', [0.10, -0.60, 0.70]), p('crop_max', [0.95, 0.60, 1.00])
+        self.crop = ([lo[0], lo[1], lo[2] - mount], [hi[0], hi[1], hi[2] - mount])
         self.plane_cfg = (p('plane_distance', 0.006), p('plane_max_tilt_deg', 10.0),
                           p('plane_iterations', 150))
         self.min_above = p('min_height_above_table', 0.008)

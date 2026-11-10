@@ -48,7 +48,7 @@ from visualization_msgs.msg import MarkerArray
 import yaml
 
 WORLD = 'cup_table'           # Gazebo world name (cup_description/worlds/cup_table.sdf)
-SPAWN_XYZ = (0.0, 0.0, 0.40)  # robot spawn position = offset of the "world" frame
+SPAWN_XYZ = [0.0, 0.0, 0.40]  # robot spawn position = offset of the "world" frame (--spawn-z)
 TABLE_Z = 0.75                # table top in Gazebo coordinates
 FIRST_CUP = 'ceramic_cup'     # the cup already in the world
 
@@ -634,11 +634,14 @@ def main():
     ap.add_argument('--cases', default=cases_default)
     ap.add_argument('--out', default=out_default)
     ap.add_argument('--only', nargs='*', help='run only these case names')
+    ap.add_argument('--spawn-z', type=float, default=0.40,
+                    help='robot mounting height, as passed to sim.launch.py')
     ap.add_argument('--no-sweep', action='store_true')
     ap.add_argument('--no-cases', action='store_true')
     ap.add_argument('--replot', action='store_true',
                     help='only redraw the plots from the CSV files in --out')
     args, ros_args = ap.parse_known_args()
+    SPAWN_XYZ[2] = args.spawn_z
     if args.replot:
         case_rows = read_csv(os.path.join(args.out, 'cases.csv'))
         sweep_rows = read_csv(os.path.join(args.out, 'sweep.csv'))

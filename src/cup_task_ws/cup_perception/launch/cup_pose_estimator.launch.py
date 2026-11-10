@@ -26,6 +26,7 @@ def generate_launch_description():
     share = get_package_share_directory('cup_perception')
     use_sim_time = {'use_sim_time': ParameterValue(LaunchConfiguration('use_sim_time'),
                                                    value_type=bool)}
+    mount = {'mount_height': ParameterValue(LaunchConfiguration('spawn_z'), value_type=float)}
     remap = [('/cup_pose_estimate', LaunchConfiguration('cup_pose_topic'))]
     return LaunchDescription([
         DeclareLaunchArgument('config', default_value=os.path.join(
@@ -35,16 +36,18 @@ def generate_launch_description():
                               description='Open RViz with the perception displays.'),
         DeclareLaunchArgument('depth_noise', default_value='false',
                               description='SIMULATION ONLY: add D435-style depth errors.'),
+        DeclareLaunchArgument('spawn_z', default_value='0.40',
+                              description='Robot mounting height (as sim.launch.py).'),
         DeclareLaunchArgument('cup_pose_topic', default_value='/cup_pose_estimate',
                               description='Topic for the target cup pose.'),
         DeclareLaunchArgument('noise_config', default_value=os.path.join(
             share, 'config', 'd435_depth_noise.yaml'), description='Depth noise settings.'),
         Node(package='cup_perception', executable='cup_pose_estimator', output='screen',
-             parameters=[LaunchConfiguration('config'), use_sim_time],
+             parameters=[LaunchConfiguration('config'), use_sim_time, mount],
              remappings=remap,
              condition=UnlessCondition(LaunchConfiguration('depth_noise'))),
         Node(package='cup_perception', executable='cup_pose_estimator', output='screen',
-             parameters=[LaunchConfiguration('config'), use_sim_time,
+             parameters=[LaunchConfiguration('config'), use_sim_time, mount,
                          {'depth_topic': '/camera/camera/aligned_depth_to_color/image_noisy'}],
              remappings=remap,
              condition=IfCondition(LaunchConfiguration('depth_noise'))),
