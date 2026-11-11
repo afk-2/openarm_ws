@@ -1,7 +1,8 @@
 # Controllers for OpenArm in Gazebo, loaded by ign_ros2_control's controller
 # manager. Controller names match openarm_bringup's
 # openarm_bimanual_controllers.yaml so MoveIt configs work unchanged. Differences:
-#   - update_rate 500 Hz (physics steps at 1 kHz; 750 Hz would alias)
+#   - update_rate 500 Hz (physics steps at 500 Hz, or 1 kHz with
+#     sim.launch.py physics_step:=0.001; 750 Hz would alias)
 #   - spline interpolation: the real config streams high-rate commands with
 #     interpolation disabled, which is jerky with sparse MoveIt waypoints.
 /**/controller_manager:

@@ -26,6 +26,8 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Pyth
 from launch_ros.actions import Node
 
 CAMERA_ARGS = ('camera_mast_height', 'camera_forward_offset', 'camera_tilt')
+# Simulation speed settings of the Gazebo camera (xacro args sim_<name>).
+SIM_CAMERA_ARGS = ('camera_width', 'camera_height', 'camera_rate')
 
 
 def running_on_wsl():
@@ -71,6 +73,24 @@ def generate_launch_description():
                         'floor (m). The pedestal is resized to match; the table top stays '
                         'at 0.75 m. Pass the same value to the estimator and pick_place '
                         'launch files.'),
+        # Simulation speed settings (no effect on the real robot: its camera is
+        # set up in the RealSense driver, and it has no physics step).
+        DeclareLaunchArgument('camera_width', default_value='640',
+                              description='Simulated camera image width (px).'),
+        DeclareLaunchArgument('camera_height', default_value='480',
+                              description='Simulated camera image height (px). 424x240 '
+                                          'was tried: no faster once the rate is 2 Hz, and '
+                                          'with depth noise the handle was then seen in only '
+                                          '20-35% of frames at 0.77 m (100% at 640x480).'),
+        DeclareLaunchArgument('camera_rate', default_value='2',
+                              description='Simulated camera frame rate (Hz). The cup '
+                                          'pose estimator runs at 2 Hz.'),
+        DeclareLaunchArgument('physics_step', default_value='0.002',
+                              description='Gazebo physics step (s). 0.002 = 500 Hz, the '
+                                          'rate of the controllers.'),
+        DeclareLaunchArgument('grasp_ik_threads', default_value='1',
+                              description='Threads of the grasp-search IK solver '
+                                          '(pick_ik) in move_group; 1 leaves CPU for Gazebo.'),
         # Defaults must match openarm_cup.urdf.xacro.
         DeclareLaunchArgument('camera_mast_height', default_value='0.30',
                               description='Mast height above the body top (m).'),
@@ -97,6 +117,8 @@ def generate_launch_description():
             'controllers_file': controllers_file,
             'sim_cup_attach': LaunchConfiguration('sim_cup_attach').perform(context),
             **{arg: LaunchConfiguration(arg).perform(context) for arg in CAMERA_ARGS},
+            **{f'sim_{arg}': LaunchConfiguration(arg).perform(context)
+               for arg in SIM_CAMERA_ARGS},
         })
         return [Node(
             package='robot_state_publisher',
@@ -108,7 +130,8 @@ def generate_launch_description():
     def gazebo(context):
         # The pedestal is resized to the spawn height (the table stays put).
         world_file = world_for_mount(world.perform(context),
-                                     LaunchConfiguration('spawn_z').perform(context))
+                                     LaunchConfiguration('spawn_z').perform(context),
+                                     LaunchConfiguration('physics_step').perform(context))
         cmd = ['ign', 'gazebo', '-r', '-v', '3',
                '--render-engine', LaunchConfiguration('render_engine').perform(context),
                world_file]
@@ -162,12 +185,13 @@ def generate_launch_description():
 
     joint_state_broadcaster = spawner('joint_state_broadcaster')
 
-    # The DetachableJoint plugin attaches the cup as soon as the robot loads;
-    # release it so the cup starts free on the table.
-    release_cup = ExecuteProcess(
-        cmd=['ros2', 'topic', 'pub', '--times', '3', '--rate', '2',
-             '/cup_sim_attach/detach', 'std_msgs/msg/Empty', '{}'],
-        output='log',
+    # The DetachableJoint plugin locks the cup to the hand as soon as the
+    # robot loads (wherever the cup is). This node sends detach until Gazebo
+    # confirms it, then keeps the lock state latched for cup_task.
+    release_cup = Node(
+        package='cup_bringup',
+        executable='cup_sim_attach_state.py',
+        output='screen',
         condition=IfCondition(LaunchConfiguration('sim_cup_attach')),
     )
     arm_and_gripper_controllers = spawner(
@@ -194,6 +218,7 @@ def generate_launch_description():
             'rviz': LaunchConfiguration('rviz'),
             'world': world,
             'spawn_z': LaunchConfiguration('spawn_z'),
+            'grasp_ik_threads': LaunchConfiguration('grasp_ik_threads'),
             **{arg: LaunchConfiguration(arg) for arg in CAMERA_ARGS},
         }.items(),
         condition=IfCondition(LaunchConfiguration('moveit')),

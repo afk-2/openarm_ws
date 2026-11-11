@@ -62,11 +62,16 @@ def launch_setup(context):
 
     sim_time = {'use_sim_time': use_sim_time}
 
+    params = moveit_config.to_dict()
+    if arg('grasp_ik_threads'):  # '' = keep the value in kinematics.yaml
+        params['robot_description_kinematics']['right_arm_ik']['memetic_num_threads'] = \
+            int(arg('grasp_ik_threads'))
+
     move_group = Node(
         package='moveit_ros_move_group',
         executable='move_group',
         output='screen',
-        parameters=[moveit_config.to_dict(), sim_time],
+        parameters=[params, sim_time],
     )
 
     models = ['table', 'robot_pedestal'] + (['ceramic_cup'] if arg('add_cup') == 'true' else [])
@@ -114,6 +119,11 @@ def generate_launch_description():
         DeclareLaunchArgument('spawn_z', default_value='0.40',
                               description='Robot mounting height above the floor (m); '
                                           'the pedestal obstacle is resized to match.'),
+        DeclareLaunchArgument(
+            'grasp_ik_threads', default_value='',
+            description='Threads of the grasp-search IK solver (pick_ik, right_arm_ik '
+                        'group). Empty = kinematics.yaml (4). sim.launch.py passes 1 so '
+                        'Gazebo keeps enough CPU on a laptop.'),
         DeclareLaunchArgument(
             'add_cup', default_value='true',
             description='Also add the cup from the world file (ground truth, a stand-in '

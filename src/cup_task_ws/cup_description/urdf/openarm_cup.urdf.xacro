@@ -38,6 +38,12 @@
   <xacro:arg name="camera_mast_height" default="0.30"/>
   <xacro:arg name="camera_forward_offset" default="0.10"/>
   <xacro:arg name="camera_tilt" default="1.10"/>
+  <!-- SIMULATION ONLY: image size and frame rate of the Gazebo camera (the
+       real D435 is configured in its driver). The low rate saves most of
+       the rendering work; the cup pose estimator runs at 2 Hz anyway. -->
+  <xacro:arg name="sim_camera_width" default="640"/>
+  <xacro:arg name="sim_camera_height" default="480"/>
+  <xacro:arg name="sim_camera_rate" default="2"/>
 
   <!-- OpenArm v2.0 kinematics, exactly as openarm_v20.urdf.xacro builds them. -->
   <xacro:property name="robot_root" value="$(find openarm_description)/assets/robot/openarm_v2.0"/>
@@ -84,7 +90,9 @@
     mast_height="$(arg camera_mast_height)"
     forward_offset="$(arg camera_forward_offset)"
     tilt="$(arg camera_tilt)"
-    simulate="$(arg use_gazebo)"/>
+    simulate="$(arg use_gazebo)"
+    sim_width="$(arg sim_camera_width)" sim_height="$(arg sim_camera_height)"
+    sim_rate="$(arg sim_camera_rate)"/>
 
   <!--
     SIMULATION-ONLY SHORTCUT, NOT PHYSICS: Gazebo's DetachableJoint can rigidly

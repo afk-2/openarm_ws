@@ -13,7 +13,9 @@
 -->
 <sdf version="1.8">
   <world name="cup_table">
-    <physics name="1ms" type="ignored">
+    <!-- 1 ms here; sim.launch.py physics_step:=<s> overrides it (default there:
+         2 ms, half the physics work). -->
+    <physics name="default" type="ignored">
       <max_step_size>0.001</max_step_size>
       <real_time_factor>1.0</real_time_factor>
     </physics>

@@ -1,0 +1,35 @@
+# SIMULATION-ONLY settings for pick_place, loaded on top of pick_place.yaml by
+# pick_place.launch.py sim:=true (the default; sim:=false = the real robot's
+# behaviour, exactly as pick_place.yaml). They make the Gazebo run faster and
+# more reliable; none of them is meant for the real robot.
+
+pick_place:
+  ros__parameters:
+    # Lock the cup to the hand with a Gazebo detachable joint while it is
+    # held (Gazebo's point contacts let a pinched cup pivot ~10 deg).
+    # Real robot: false (friction of the finger pads holds the cup).
+    use_sim_attach: true
+
+    # Close the gripper to a fixed width instead of until the fingers stall.
+    # Gazebo's finger joints are position-driven with unlimited force, so
+    # "until they stall" pushes them into the cup and Gazebo slows to a crawl
+    # (at worst it all but stops). Needs use_sim_attach: the lock holds the cup.
+    # Real robot: stall.
+    gripper_close_mode: width
+    # Width mode closes to the cup diameter minus this (m).
+    sim_grasp_width_under_diameter: 0.002
+    # Width mode cannot tell a missed cup from the finger width, so the cup's
+    # true position in Gazebo is checked instead: further than this (m) from
+    # the middle of the fingers = missed. Real robot: the stall width check.
+    sim_missed_cup_distance: 0.015
+
+    # Releasing a locked cup: the fingers first open to the cup diameter plus
+    # this (m), then the cup is unlocked, then they open fully. (Unlocking
+    # with the fingers still pressed in, or swinging them fully open with the
+    # cup still locked, both upset Gazebo.) Real robot: just opens.
+    sim_release_clearance: 0.004
+
+    # Check the whole sequence only for the 20 most comfortable grasps at the
+    # cup (saves planning time on a laptop that also runs Gazebo).
+    # Real robot: 0 (all).
+    grasp_max_candidates: 20

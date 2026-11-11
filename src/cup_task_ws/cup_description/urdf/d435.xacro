@@ -16,7 +16,8 @@
 
   <xacro:include filename="$(find realsense2_description)/urdf/_d435.urdf.xacro"/>
 
-  <xacro:macro name="cup_d435" params="parent *origin simulate:=false name:=camera gz_topic:=d435">
+  <xacro:macro name="cup_d435" params="parent *origin simulate:=false name:=camera gz_topic:=d435
+                                  sim_width:=640 sim_height:=480 sim_rate:=15">
 
     <xacro:sensor_d435 parent="${parent}" name="${name}" use_nominal_extrinsics="${simulate}">
       <xacro:insert_block name="origin"/>
@@ -30,14 +31,17 @@
           <topic>${gz_topic}</topic>
           <ignition_frame_id>${name}_color_optical_frame</ignition_frame_id>
           <always_on>true</always_on>
-          <update_rate>15</update_rate>
+          <update_rate>${sim_rate}</update_rate>
           <visualize>false</visualize>
           <camera name="${name}">
-            <!-- D435 colour: 69 x 42 deg FOV, here at 640x480. -->
+            <!-- D435 colour: 69 deg wide. Image size and rate are simulation
+                 settings (sim.launch.py camera_width/height/rate); the vertical
+                 view follows from the image shape: 42 deg at 424x240 (as the
+                 real camera), 54 deg at 640x480. -->
             <horizontal_fov>1.2043</horizontal_fov>
             <image>
-              <width>640</width>
-              <height>480</height>
+              <width>${sim_width}</width>
+              <height>${sim_height}</height>
               <format>R8G8B8</format>
             </image>
             <clip>
@@ -46,7 +50,7 @@
             </clip>
             <depth_camera>
               <clip>
-                <!-- D435 depth range: ~0.28 m minimum at 640x480. -->
+                <!-- D435 depth range: ~0.28 m minimum. -->
                 <near>0.2</near>
                 <far>6.0</far>
               </clip>

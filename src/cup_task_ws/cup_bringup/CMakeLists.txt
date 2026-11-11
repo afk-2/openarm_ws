@@ -11,7 +11,7 @@ install(DIRECTORY config launch rviz
   DESTINATION share/${PROJECT_NAME}
 )
 
-install(PROGRAMS scripts/gz_cloud_to_optical.py
+install(PROGRAMS scripts/gz_cloud_to_optical.py scripts/cup_sim_attach_state.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

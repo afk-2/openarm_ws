@@ -60,6 +60,9 @@ pick_place:
     # noise on) both settings completed 1/5; the cup was grasped and put down
     # in 3/5 with right_arm_ik vs 2/5 with "" (results/pick_place_runs_*.csv).
     grasp_search_group: right_arm_ik
+    # Check the whole sequence only for this many of the most comfortable
+    # grasps found at the cup (0 = all of them). The sim settings use 20.
+    grasp_max_candidates: 0
     # Skip directions where a finger would point within this angle of the
     # handle (or of the "handle could be here" zone): cheap first filter.
     handle_finger_min_angle_deg: 25.0
@@ -91,9 +94,12 @@ pick_place:
     # Abort if the carried cup tilts more than this (deg).
     max_cup_tilt_deg: 5.0
 
-    # Gripper: close until the fingers stall on the cup, then hold this much
-    # inside the measured width (a gentle, bounded squeeze). After each
-    # gripper command, wait its close_duration plus this settle time (s).
+    # Gripper: "stall" = close until the fingers stall on the cup, then hold
+    # grasp_squeeze inside the measured width (a gentle, bounded squeeze).
+    # ("width" is a simulation-only shortcut, see pick_place_sim.yaml.)
+    # After each gripper command, wait its close_duration plus the settle
+    # time below (s).
+    gripper_close_mode: stall
     grasp_squeeze: 0.002
     # The fingers must stop on the cup: stopping wider than the cup by more
     # than this means something else (e.g. the handle) is between them.
@@ -108,5 +114,7 @@ pick_place:
     # SIMULATION-ONLY shortcut: lock the cup to the hand with a Gazebo
     # detachable joint while it is held (Gazebo's point contacts let a
     # pinched cup pivot ~10 deg). Off here so the real robot never uses it;
-    # pick_place.launch.py turns it on for the simulation.
+    # pick_place.launch.py sim:=true (its default) loads pick_place_sim.yaml
+    # on top of this file, which turns it on together with the other
+    # simulation-only settings.
     use_sim_attach: false

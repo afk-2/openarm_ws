@@ -36,7 +36,8 @@
   </xacro:macro>
 
   <xacro:macro name="cup_camera_mast"
-               params="parent mount_xyz mast_height forward_offset tilt simulate:=false">
+               params="parent mount_xyz mast_height forward_offset tilt simulate:=false
+                       sim_width:=640 sim_height:=480 sim_rate:=15">
     <xacro:property name="plate_t" value="0.006"/>
     <xacro:property name="bar" value="0.020"/>
     <xacro:property name="bracket_t" value="0.010"/>
@@ -79,7 +80,8 @@
     <xacro:cup_box_link name="camera_tilt_plate" size="0.030 0.040 ${tilt_plate_t}"
                         xyz="0 0 ${tilt_plate_t / 2}" mass="0.02"/>
 
-    <xacro:cup_d435 parent="camera_tilt_plate" simulate="${simulate}">
+    <xacro:cup_d435 parent="camera_tilt_plate" simulate="${simulate}"
+                    sim_width="${sim_width}" sim_height="${sim_height}" sim_rate="${sim_rate}">
       <origin xyz="0 0 ${tilt_plate_t}" rpy="0 0 0"/>
     </xacro:cup_d435>
   </xacro:macro>

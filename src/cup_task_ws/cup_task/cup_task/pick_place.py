@@ -103,7 +103,19 @@ class PickPlace(Node):
         self.finger_min_angle = p('handle_finger_min_angle_deg', 25.0).value
         self.refuse_hidden = p('refuse_hidden_handle', False).value
         self.max_stall_over = p('max_stall_over_diameter', 0.006).value
+        self.max_candidates = p('grasp_max_candidates', 0).value
         use_sim_attach = p('use_sim_attach', False).value
+        # Simulation-only settings (pick_place_sim.yaml); used with use_sim_attach.
+        self.close_mode = p('gripper_close_mode', 'stall').value
+        self.width_under = p('sim_grasp_width_under_diameter', 0.002).value
+        self.sim_missed_distance = p('sim_missed_cup_distance', 0.015).value
+        self.sim_release_clearance = p('sim_release_clearance', 0.004).value
+        if self.close_mode not in ('stall', 'width'):
+            raise ValueError('gripper_close_mode must be "stall" or "width"')
+        if self.close_mode == 'width' and not use_sim_attach:
+            self.get_logger().warn('gripper_close_mode "width" is a simulation shortcut and '
+                                   'needs use_sim_attach; using "stall" instead')
+            self.close_mode = 'stall'
 
         with open(cup_config) as f:
             self.cup = grasps.Cup.from_config(yaml.safe_load(f)['cup'])
@@ -352,9 +364,14 @@ class PickPlace(Node):
             if sol is not None:
                 ranked.append((self.comfort(sol), grasp, quat, ee, sol))
         ranked.sort(key=lambda r: -r[0])
+        reachable = len(ranked)
+        if self.max_candidates > 0:
+            ranked = ranked[:self.max_candidates]
         log(f'       {len(candidates)} grasps keep the fingers away from the handle'
-            f'{" zone" if handle_hidden else ""}; {len(ranked)} reachable at the cup '
-            f'({time.monotonic() - t0:.0f} s); trying them from most to least comfortable')
+            f'{" zone" if handle_hidden else ""}; {reachable} reachable at the cup '
+            f'({time.monotonic() - t0:.0f} s); trying '
+            + (f'the {len(ranked)} most comfortable' if len(ranked) < reachable else 'them')
+            + ' from most to least comfortable')
 
         # 3) The whole sequence, then the handle clearance with MoveIt.
         for comfort, grasp, quat, ee, grasp_sol in ranked:
@@ -571,6 +588,42 @@ class PickPlace(Node):
                             f'(wanted {target * 1000:.0f} mm); something is blocking it')
 
     def step_close(self):
+        if self.close_mode == 'width':
+            self.close_to_width()
+        else:
+            self.close_until_stall()
+        self.moveit.attach(CUP_ID, self.gripper.ee_link, self.gripper.touch_links)
+        if self.correct_place and self.sees_held_cup:
+            self.correct_for_cup_in_hand()
+        elif self.correct_place:
+            self.get_logger().warn('       slip correction SKIPPED: the pose source cannot see '
+                                   'the cup in the hand')
+
+    def close_to_width(self):
+        """
+        SIMULATION ONLY: close to just under the cup's width, then lock the cup.
+
+        Gazebo's finger joints are driven by position, with unlimited force:
+        closing "until they stall" pushes them into the cup, and Gazebo slows
+        to a crawl (or all but stops) resolving that. Here the fingers only
+        just touch the cup and the lock does the holding. Finger width says
+        nothing about a missed cup in this mode, so the cup's true position
+        from Gazebo is checked instead.
+        """
+        target = self.cup.outer_diameter - self.width_under
+        opening = self.set_gripper(target)
+        self.get_logger().info(f'       [sim only] jaw closed to {opening * 1000:.0f} mm '
+                               f'(cup is {self.cup.outer_diameter * 1000:.0f} mm)')
+        if opening > self.cup.outer_diameter + self.max_stall_over:
+            raise TaskError(f'fingers stopped at {opening * 1000:.0f} mm, wider than the cup: '
+                            'something else (the handle?) is between them')
+        off = self.sim_attach.cup_distance(self.cup_base[:2])
+        if off > self.sim_missed_distance:
+            raise TaskError('gripper closed on nothing: the cup was missed (in Gazebo it is '
+                            f'{off * 1000:.0f} mm from the middle of the fingers)')
+        self.sim_attach.attach()
+
+    def close_until_stall(self):
         # 1) Close until the fingers stall on the cup.
         stalled = self.set_gripper(0.0)
         self.get_logger().info(f'       jaw stopped at {stalled * 1000:.0f} mm '
@@ -587,12 +640,6 @@ class PickPlace(Node):
         # 2) Hold just inside the measured width: a gentle, bounded squeeze
         #    instead of driving the fingers on towards fully closed.
         self.set_gripper(stalled - self.grasp_squeeze)
-        self.moveit.attach(CUP_ID, self.gripper.ee_link, self.gripper.touch_links)
-        if self.correct_place and self.sees_held_cup:
-            self.correct_for_cup_in_hand()
-        elif self.correct_place:
-            self.get_logger().warn('       slip correction SKIPPED: the pose source cannot see '
-                                   'the cup in the hand')
 
     def correct_for_cup_in_hand(self):
         """
@@ -611,11 +658,16 @@ class PickPlace(Node):
             self.poses[name] = (pos - shift, opening)
 
     def step_release(self):
-        # Open while the cup is still (sim-)locked, so the fingers leave the
-        # cup before Gazebo starts checking hand-cup contacts again.
-        self.step_open()
         if self.sim_attach:
+            # (sim only) Three steps, so the fingers are never pressed into a
+            # free cup (Gazebo crawls) and never swing wide with a locked one:
+            # open just clear of the cup while it is still locked, unlock it,
+            # then open fully.
+            clear = min(self.cup.outer_diameter + self.sim_release_clearance,
+                        self.gripper.max_opening)
+            self.set_gripper(max(clear, self.opening()))
             self.sim_attach.detach()
+        self.step_open()
         self.moveit.detach(CUP_ID, self.gripper.ee_link)
 
     def step_retreat(self):

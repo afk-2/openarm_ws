@@ -12,6 +12,7 @@ import xacro
 
 OPENARM_PREFIX = 'package://openarm_description/'
 MIRRORED_PREFIX = 'package://cup_description/meshes/openarm_mirrored/'
+FINGER_LIMIT_SLACK = 0.02  # rad, simulation only (see free_finger_end_stops)
 
 
 def use_mirrored_collision_meshes(urdf):
@@ -36,9 +37,31 @@ def use_mirrored_collision_meshes(urdf):
     return ET.tostring(root, encoding='unicode')
 
 
+def free_finger_end_stops(urdf, slack=FINGER_LIMIT_SLACK):
+    """
+    SIMULATION ONLY: move the finger joints' closed end stop `slack` rad past 0.
+
+    In Gazebo (DART) a position-driven joint that sits exactly on its limit
+    stays stuck there. OpenArm's fingers start on theirs (closed = 0 = upper
+    limit): on a fresh simulation the second finger did not open with the
+    first until something knocked it, and after a full close neither finger
+    opened again. With the stop slightly past 0 the fingers never rest on it.
+    Commands still stop at 0.
+    """
+    root = ET.fromstring(urdf)
+    for joint in root.iterfind('joint'):
+        limit = joint.find('limit')
+        if 'finger_joint' in joint.get('name', '') and limit is not None:
+            limit.set('upper', str(float(limit.get('upper')) + slack))
+    return ET.tostring(root, encoding='unicode')
+
+
 def openarm_cup_urdf(mappings=None):
     """Process openarm_cup.urdf.xacro with the given xacro args."""
     xacro_file = os.path.join(
         get_package_share_directory('cup_description'), 'urdf', 'openarm_cup.urdf.xacro')
     urdf = xacro.process_file(xacro_file, mappings=mappings or {}).toxml()
-    return use_mirrored_collision_meshes(urdf)
+    urdf = use_mirrored_collision_meshes(urdf)
+    if str((mappings or {}).get('use_gazebo', 'false')).lower() == 'true':
+        urdf = free_finger_end_stops(urdf)
+    return urdf

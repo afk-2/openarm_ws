@@ -85,3 +85,11 @@
   ros_type_name: std_msgs/msg/Empty
   gz_type_name: ignition.msgs.Empty
   direction: ROS_TO_GZ
+
+# Lock state, sent by Gazebo only when it changes ("attached"/"detached");
+# cup_sim_attach_state.py republishes it latched on /cup_sim_attach/attached.
+- ros_topic_name: /cup_sim_attach/state
+  gz_topic_name: /cup_sim_attach/state
+  ros_type_name: std_msgs/msg/String
+  gz_type_name: ignition.msgs.StringMsg
+  direction: GZ_TO_ROS
